@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: cabildoos-api
+    runtime: python
+    region: ohio          # us-east-ohio — más cercano a Venezuela/Argentina
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: SUPABASE_URL
+        sync: false       # lo cargás manualmente en Render dashboard
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN
+        value: https://cabildoos.pages.dev
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.11.0
