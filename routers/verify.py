@@ -146,7 +146,7 @@ async def test_gemini():
         return {"ok": False, "error": "GEMINI_API_KEY no configurada"}
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         response = model.generate_content("Respondé solo con la palabra: OK")
         return {"ok": True, "response": response.text.strip()}
     except Exception as e:
