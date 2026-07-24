@@ -25,6 +25,7 @@ class VerificarDocumentoRequest(BaseModel):
     nombre_declarado: str
     apellido_declarado: str
     numero_declarado: str
+    pais_declarado: Optional[str] = None
 
 
 class DocumentoExtraido(BaseModel):

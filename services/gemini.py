@@ -57,6 +57,7 @@ async def verificar_documento(
     nombre_declarado: str,
     apellido_declarado: str,
     numero_declarado: str,
+    pais_declarado: str = "",
 ) -> DocumentoExtraido:
     """
     Llama a Gemini Vision para verificar un documento de identidad.
@@ -79,6 +80,7 @@ El usuario declaró:
 - Nombre: {nombre_declarado}
 - Apellido: {apellido_declarado}
 - Número de documento: {numero_declarado}
+- País emisor: {pais_declarado or 'no especificado'}
 
 Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional ni markdown:
 

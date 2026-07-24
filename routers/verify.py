@@ -68,6 +68,7 @@ async def endpoint_verificar_documento(
         nombre_declarado=req.nombre_declarado,
         apellido_declarado=req.apellido_declarado,
         numero_declarado=req.numero_declarado,
+        pais_declarado=req.pais_declarado or "",
     )
     # La imagen y los datos personales se descartan aquí — nunca se persisten
 
