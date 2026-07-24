@@ -51,11 +51,10 @@ class VerificarDocumentoResponse(BaseModel):
 
 class SubmitVerificacionRequest(BaseModel):
     verification_id: str
-    datos_declarados: DatosDeclarados
-    selfie_liveness_b64: str
-    liveness_instruccion: str
+    # Solo la foto censurada — cara visible, datos del documento pixelados
     selfie_doc_b64: str
-    doc_extracted: Optional[DocumentoExtraido] = None
+    # Resultado booleano del análisis Gemini (sin datos personales)
+    gemini_match: bool = False
 
 
 class SubmitVerificacionResponse(BaseModel):
