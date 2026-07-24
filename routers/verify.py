@@ -134,3 +134,20 @@ async def endpoint_submit_verificacion(
 @router.get("/ping")
 async def ping():
     return {"ok": True, "service": "cabildoos-api"}
+
+
+@router.get("/test-gemini")
+async def test_gemini():
+    """Verifica que la conexión con Gemini funciona."""
+    import os
+    import google.generativeai as genai
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        return {"ok": False, "error": "GEMINI_API_KEY no configurada"}
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content("Respondé solo con la palabra: OK")
+        return {"ok": True, "response": response.text.strip()}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {str(e)}"}
