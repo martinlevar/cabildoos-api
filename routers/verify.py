@@ -1,4 +1,7 @@
 import uuid
+import hashlib
+import hmac
+import os
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from supabase import Client
@@ -16,15 +19,49 @@ router = APIRouter(prefix="/api/verify", tags=["verificacion"])
 logger = logging.getLogger(__name__)
 
 
+def _doc_hash(numero_doc: str) -> str:
+    """
+    Hash unidireccional del número de documento.
+    Usa HMAC-SHA256 con un salt del entorno — no se puede revertir al número original.
+    El salt evita ataques de diccionario (probar todos los DNIs posibles).
+    """
+    salt = os.environ.get("DOC_HASH_SALT", "cabildoos-default-salt-cambiar-en-prod")
+    return hmac.new(
+        salt.encode(),
+        numero_doc.strip().upper().encode(),
+        hashlib.sha256
+    ).hexdigest()
+
+
 @router.post("/documento", response_model=VerificarDocumentoResponse)
 async def endpoint_verificar_documento(
     req: VerificarDocumentoRequest,
+    supabase: Client = Depends(get_supabase),
 ):
     """
-    Paso 2: recibe foto del documento, llama a Gemini Vision y retorna el análisis.
-    La foto y los datos extraídos NO se guardan — privacidad por diseño.
-    Solo el resultado (match: bool) llega al frontend.
+    Paso 2: verifica duplicados via hash, llama a Gemini Vision y retorna análisis.
+    La foto y los datos personales NO se guardan — privacidad por diseño.
     """
+    # ── Verificar duplicado ANTES de procesar ─────────────────────────────────
+    doc_hash = _doc_hash(req.numero_declarado)
+    try:
+        existing = supabase.table("verifications") \
+            .select("id, status") \
+            .eq("doc_hash", doc_hash) \
+            .execute()
+        if existing.data:
+            rec = existing.data[0]
+            if rec["status"] in ("aprobado", "pendiente_revision"):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Este documento ya fue usado para verificar una cuenta. Cada documento solo puede usarse una vez."
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Error verificando duplicado: {e}")
+
+    # ── Llamar a Gemini Vision ────────────────────────────────────────────────
     extracted = await verificar_documento(
         image_b64=req.image_b64,
         tipo_doc=req.tipo_doc,
@@ -32,14 +69,25 @@ async def endpoint_verificar_documento(
         apellido_declarado=req.apellido_declarado,
         numero_declarado=req.numero_declarado,
     )
-    # La imagen se descarta aquí — nunca se persiste en el servidor
+    # La imagen y los datos personales se descartan aquí — nunca se persisten
+
+    # ── Guardar hash (anti-duplicado) y resultado en DB ───────────────────────
     match = extracted.nombre_coincide and extracted.numero_coincide and extracted.es_documento_real
+    try:
+        supabase.table("verifications").upsert({
+            "id":       req.verification_id,
+            "doc_hash": doc_hash,   # hash unidireccional — no el número real
+            "doc_match": match,
+            "status":   "en_proceso",
+        }).execute()
+    except Exception as e:
+        logger.warning(f"Error guardando hash: {e}")
 
     return VerificarDocumentoResponse(
         ok=True,
         match=match,
         extracted=extracted,
-        foto_url=None,   # nunca se guarda
+        foto_url=None,
     )
 
 

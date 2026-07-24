@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS verifications (
   status          TEXT NOT NULL DEFAULT 'pendiente_revision'
                   CHECK (status IN ('pendiente_revision', 'aprobado', 'rechazado')),
 
+  -- Hash unidireccional del número de documento (HMAC-SHA256)
+  -- Permite detectar duplicados sin guardar el número real
+  -- Con el salt correcto es imposible revertir al número original
+  doc_hash        TEXT UNIQUE,
+
   -- Resultado del análisis Gemini (true/false, sin datos personales)
   doc_match       BOOLEAN,
 

@@ -20,3 +20,5 @@ services:
         value: production
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: DOC_HASH_SALT
+        sync: false   # generá un string aleatorio largo y guardalo acá
