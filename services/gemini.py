@@ -38,7 +38,7 @@ def _extract_json(text: str) -> dict:
 
 def _call_gemini(prompt: str, image_b64: str) -> str:
     """Llamada sincrónica a Gemini — se corre en thread separado."""
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel("gemini-3.5-flash")
 
     # Pasar imagen directamente como inline_data (más confiable que PIL)
     image_part = {
