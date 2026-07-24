@@ -138,7 +138,7 @@ async def ping():
 
 @router.get("/test-gemini")
 async def test_gemini():
-    """Verifica que la conexión con Gemini funciona."""
+    """Lista los modelos disponibles con la API key configurada."""
     import os
     import google.generativeai as genai
     api_key = os.environ.get("GEMINI_API_KEY", "")
@@ -146,8 +146,10 @@ async def test_gemini():
         return {"ok": False, "error": "GEMINI_API_KEY no configurada"}
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.5-flash")
-        response = model.generate_content("Respondé solo con la palabra: OK")
-        return {"ok": True, "response": response.text.strip()}
+        models = [
+            m.name for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        ]
+        return {"ok": True, "modelos_disponibles": models}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)}"}
