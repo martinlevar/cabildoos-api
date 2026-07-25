@@ -107,29 +107,34 @@ async def endpoint_submit_verificacion(
     con los datos del documento pixelados). No se guardan datos personales.
     El admin ve la cara pero nunca el contenido del documento.
     """
-    # Subir foto censurada a Storage — si falla, igual guardamos el registro
-    foto_censurada_url = None
-    try:
-        foto_censurada_url = upload_selfie_doc(
-            supabase, req.verification_id, req.selfie_doc_b64
-        )
-        logger.info(f"Foto censurada subida: {foto_censurada_url[:60]}...")
-    except Exception as e:
-        logger.error(f"Error Storage (no crítico): {e}")
-        # Continuamos — el admin puede revisar sin foto si es necesario
+    import asyncio
 
-    # Guardar en DB — esto SÍ es crítico
+    # Guardar en DB primero — responder rápido al cliente
     try:
         supabase.table("verifications").upsert({
-            "id":             req.verification_id,
-            "status":         "pendiente_revision",
-            "doc_match":      req.gemini_match,
-            "selfie_doc_url": foto_censurada_url,
+            "id":        req.verification_id,
+            "status":    "pendiente_revision",
+            "doc_match": req.gemini_match,
         }).execute()
         logger.info(f"Verificación guardada: {req.verification_id}")
     except Exception as e:
         logger.error(f"Error DB: {e}")
         raise HTTPException(status_code=500, detail=f"Error DB: {e}")
+
+    # Subir foto a Storage en background — no bloquea la respuesta al cliente
+    async def _upload_foto():
+        try:
+            url = await asyncio.to_thread(
+                upload_selfie_doc, supabase, req.verification_id, req.selfie_doc_b64
+            )
+            supabase.table("verifications").update(
+                {"selfie_doc_url": url}
+            ).eq("id", req.verification_id).execute()
+            logger.info(f"Foto subida en background: {url[:60]}...")
+        except Exception as e:
+            logger.error(f"Error Storage background: {e}")
+
+    asyncio.create_task(_upload_foto())
 
     return SubmitVerificacionResponse(
         ok=True,
