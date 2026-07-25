@@ -51,7 +51,10 @@ async def endpoint_verificar_documento(
             .execute()
         if existing.data:
             rec = existing.data[0]
-            if rec["status"] in ("aprobado", "pendiente_revision"):
+            if rec["status"] == "rechazado":
+                # Permitir reintento — limpiar el registro anterior
+                supabase.table("verifications").delete().eq("doc_hash", doc_hash).execute()
+            else:
                 raise HTTPException(
                     status_code=409,
                     detail="Este documento ya fue usado para verificar una cuenta. Cada documento solo puede usarse una vez."
@@ -69,11 +72,13 @@ async def endpoint_verificar_documento(
         apellido_declarado=req.apellido_declarado,
         numero_declarado=req.numero_declarado,
         pais_declarado=req.pais_declarado or "",
+        fecha_nac_declarada=req.fecha_nac_declarada or "",
     )
     # La imagen y los datos personales se descartan aquí — nunca se persisten
 
     # ── Guardar hash (anti-duplicado) y resultado en DB ───────────────────────
-    match = extracted.nombre_coincide and extracted.numero_coincide and extracted.es_documento_real
+    match = (extracted.nombre_coincide and extracted.numero_coincide
+             and extracted.fecha_coincide and extracted.es_documento_real)
     try:
         supabase.table("verifications").upsert({
             "id":       req.verification_id,
@@ -131,6 +136,43 @@ async def endpoint_submit_verificacion(
         verification_id=req.verification_id,
         status="pendiente_revision",
     )
+
+
+@router.post("/liveness")
+async def verificar_liveness(body: dict):
+    """
+    Verifica que la persona en la foto siguió la instrucción de liveness.
+    Llama a Gemini Vision con la instrucción específica.
+    La imagen NO se guarda.
+    """
+    import asyncio
+    from services.gemini import _call_gemini, _extract_json
+
+    image_b64 = body.get("image_b64", "")
+    instruccion = body.get("instruccion", "")
+    if not image_b64 or not instruccion:
+        return {"cumplió": True}
+
+    prompt = f"""Look at this selfie photo. The person was asked to perform this action: "{instruccion}"
+
+Determine if the person is clearly performing the requested action in this photo.
+
+Return ONLY valid JSON:
+{{
+  "cumplió": true or false,
+  "confianza": 0.0 to 1.0,
+  "observacion": "brief description of what you see"
+}}
+
+Be strict: if the action requires a specific visible gesture (winking, smiling broadly, tilting head, opening mouth, showing fingers, touching nose), the person must clearly be doing it. A neutral face counts as false for any action-based instruction."""
+
+    try:
+        raw = await asyncio.to_thread(_call_gemini, prompt, image_b64)
+        data = _extract_json(raw)
+        return {"cumplió": bool(data.get("cumplió", True)), **data}
+    except Exception as e:
+        logger.error(f"Error liveness: {e}")
+        return {"cumplió": True}  # ante error, no bloquear
 
 
 @router.post("/censurar-campos")

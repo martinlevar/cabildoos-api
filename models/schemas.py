@@ -26,6 +26,7 @@ class VerificarDocumentoRequest(BaseModel):
     apellido_declarado: str
     numero_declarado: str
     pais_declarado: Optional[str] = None
+    fecha_nac_declarada: Optional[str] = None  # DD/MM/YYYY declarada por el usuario
 
 
 class DocumentoExtraido(BaseModel):
@@ -36,6 +37,7 @@ class DocumentoExtraido(BaseModel):
     es_documento_real: bool = False
     nombre_coincide: bool = False
     numero_coincide: bool = False
+    fecha_coincide: bool = False
     confianza: float = 0.0
     observaciones: Optional[str] = None
 

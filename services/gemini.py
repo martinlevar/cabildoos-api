@@ -58,6 +58,7 @@ async def verificar_documento(
     apellido_declarado: str,
     numero_declarado: str,
     pais_declarado: str = "",
+    fecha_nac_declarada: str = "",
 ) -> DocumentoExtraido:
     """
     Llama a Gemini Vision para verificar un documento de identidad.
@@ -81,6 +82,7 @@ El usuario declaró:
 - Apellido: {apellido_declarado}
 - Número de documento: {numero_declarado}
 - País emisor: {pais_declarado or 'no especificado'}
+- Fecha de nacimiento: {fecha_nac_declarada or 'no especificada'}
 
 Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional ni markdown:
 
@@ -92,6 +94,7 @@ Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional
   "es_documento_real": true si es un documento físico real fotografiado, false si es una pantalla o imagen digital,
   "nombre_coincide": true si el nombre+apellido del documento coincide con "{nombre_declarado} {apellido_declarado}" (ignorá mayúsculas/minúsculas y acentos),
   "numero_coincide": true si el número del documento coincide con "{numero_declarado}" (ignorá puntos y espacios),
+  "fecha_coincide": true si la fecha de nacimiento del documento coincide con "{fecha_nac_declarada}" (ignorá formato, comparar día/mes/año). Si no se declaró fecha, devolver false,
   "confianza": número entre 0.0 y 1.0 indicando qué tan legible está el documento,
   "observaciones": "breve descripción de lo que ves y cualquier problema con la foto"
 }}"""
