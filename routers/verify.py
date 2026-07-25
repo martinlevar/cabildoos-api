@@ -102,28 +102,29 @@ async def endpoint_submit_verificacion(
     con los datos del documento pixelados). No se guardan datos personales.
     El admin ve la cara pero nunca el contenido del documento.
     """
+    # Subir foto censurada a Storage — si falla, igual guardamos el registro
     foto_censurada_url = None
     try:
-        # selfie_doc_b64 es la imagen ya censurada — cara visible, documento pixelado
         foto_censurada_url = upload_selfie_doc(
             supabase, req.verification_id, req.selfie_doc_b64
         )
+        logger.info(f"Foto censurada subida: {foto_censurada_url[:60]}...")
     except Exception as e:
-        logger.error(f"Error subiendo foto censurada: {e}")
-        raise HTTPException(status_code=500, detail="Error subiendo imagen")
+        logger.error(f"Error Storage (no crítico): {e}")
+        # Continuamos — el admin puede revisar sin foto si es necesario
 
-    # En DB solo guardamos: ID, timestamp, status y la URL de la foto censurada
-    # CERO datos personales (ni nombre, ni DNI, ni email)
+    # Guardar en DB — esto SÍ es crítico
     try:
         supabase.table("verifications").upsert({
-            "id":              req.verification_id,
-            "status":          "pendiente_revision",
-            "doc_match":       req.gemini_match,        # true/false del análisis Gemini
-            "selfie_doc_url":  foto_censurada_url,      # foto censurada para el admin
+            "id":             req.verification_id,
+            "status":         "pendiente_revision",
+            "doc_match":      req.gemini_match,
+            "selfie_doc_url": foto_censurada_url,
         }).execute()
+        logger.info(f"Verificación guardada: {req.verification_id}")
     except Exception as e:
-        logger.error(f"Error guardando en DB: {e}")
-        raise HTTPException(status_code=500, detail="Error guardando verificación")
+        logger.error(f"Error DB: {e}")
+        raise HTTPException(status_code=500, detail=f"Error DB: {e}")
 
     return SubmitVerificacionResponse(
         ok=True,
@@ -148,24 +149,24 @@ async def censurar_campos(body: dict):
     if not image_b64:
         return {"campos": []}
 
-    prompt = """Esta imagen muestra a una persona sosteniendo un documento de identidad.
+    prompt = """This image shows a person holding an identity document (DNI, passport, ID card, or driver's license).
 
-Tu tarea: identificar las zonas del documento que contienen datos personales sensibles
-(nombre, apellido, número de documento, fecha de nacimiento, dirección, CUIL/CUIT, cualquier código).
-NO incluyas la foto/cara que aparece impresa en el documento — solo los campos de texto.
-NO incluyas la cara de la persona real que sostiene el documento.
+Locate the identity document in the image.
 
-Respondé SOLO con JSON, sin texto adicional:
+Return ONLY valid JSON, no extra text:
 {
-  "campos": [
-    {"label": "nombre", "x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0},
-    {"label": "numero", "x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0}
-  ]
+  "document": {
+    "x1": 0.0,
+    "y1": 0.0,
+    "x2": 1.0,
+    "y2": 1.0
+  }
 }
 
-Las coordenadas son fracciones de las dimensiones de la imagen (0.0 = borde izquierdo/superior, 1.0 = borde derecho/inferior).
-Si no encontrás el documento, devolvé {"campos": [], "error": "documento no visible"}.
-Devolvé todos los campos de texto personal que veas."""
+Where x1,y1 is the top-left corner and x2,y2 is the bottom-right corner of the document.
+All values are fractions of the image dimensions (0.0 = left/top edge, 1.0 = right/bottom edge).
+
+If no document is clearly visible, return: {"document": null}"""
 
     try:
         raw = await asyncio.to_thread(_call_gemini, prompt, image_b64)
