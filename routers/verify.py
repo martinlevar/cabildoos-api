@@ -109,6 +109,34 @@ async def endpoint_submit_verificacion(
     """
     import asyncio
 
+    # ── Validar que /documento fue llamado primero (doc_hash debe existir) ────
+    try:
+        chk = supabase.table("verifications") \
+            .select("id, doc_hash, status") \
+            .eq("id", req.verification_id) \
+            .execute()
+        if not chk.data:
+            raise HTTPException(
+                status_code=400,
+                detail="Verificación de documento requerida antes de enviar."
+            )
+        rec = chk.data[0]
+        if not rec.get("doc_hash"):
+            raise HTTPException(
+                status_code=400,
+                detail="Verificación de documento incompleta. Reiniciá el proceso."
+            )
+        if rec.get("status") == "aprobado":
+            raise HTTPException(
+                status_code=409,
+                detail="Este documento ya fue verificado y aprobado."
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error validando verificación: {e}")
+        raise HTTPException(status_code=500, detail=f"Error de validación: {e}")
+
     # Guardar en DB primero — responder rápido al cliente
     try:
         supabase.table("verifications").upsert({
