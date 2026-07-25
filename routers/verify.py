@@ -177,6 +177,30 @@ If no document is clearly visible, return: {"document": null}"""
         return {"campos": [], "error": str(e)}
 
 
+@router.get("/status/{verification_id}")
+async def get_verification_status(
+    verification_id: str,
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    El usuario consulta el estado de su propia verificación por ID.
+    Solo devuelve: status y butaca_numero — sin datos personales.
+    """
+    try:
+        res = supabase.table("verifications") \
+            .select("status, butaca_numero") \
+            .eq("id", verification_id) \
+            .single() \
+            .execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="No encontrado")
+        return {"ok": True, **res.data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/ping")
 async def ping():
     return {"ok": True, "service": "cabildoos-api"}
