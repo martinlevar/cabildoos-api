@@ -132,6 +132,50 @@ async def endpoint_submit_verificacion(
     )
 
 
+@router.post("/censurar-campos")
+async def censurar_campos(body: dict):
+    """
+    Recibe la foto del selfie sosteniendo el documento.
+    Llama a Gemini para detectar las coordenadas de los campos de texto personal
+    (nombre, número, fecha, dirección) sin tocar la cara de la persona.
+    Devuelve bounding boxes — el cliente aplica la pixelación localmente.
+    La imagen NO se guarda.
+    """
+    import asyncio
+    from services.gemini import _call_gemini, _extract_json
+
+    image_b64 = body.get("image_b64", "")
+    if not image_b64:
+        return {"campos": []}
+
+    prompt = """Esta imagen muestra a una persona sosteniendo un documento de identidad.
+
+Tu tarea: identificar las zonas del documento que contienen datos personales sensibles
+(nombre, apellido, número de documento, fecha de nacimiento, dirección, CUIL/CUIT, cualquier código).
+NO incluyas la foto/cara que aparece impresa en el documento — solo los campos de texto.
+NO incluyas la cara de la persona real que sostiene el documento.
+
+Respondé SOLO con JSON, sin texto adicional:
+{
+  "campos": [
+    {"label": "nombre", "x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0},
+    {"label": "numero", "x1": 0.0, "y1": 0.0, "x2": 0.0, "y2": 0.0}
+  ]
+}
+
+Las coordenadas son fracciones de las dimensiones de la imagen (0.0 = borde izquierdo/superior, 1.0 = borde derecho/inferior).
+Si no encontrás el documento, devolvé {"campos": [], "error": "documento no visible"}.
+Devolvé todos los campos de texto personal que veas."""
+
+    try:
+        raw = await asyncio.to_thread(_call_gemini, prompt, image_b64)
+        data = _extract_json(raw)
+        return data
+    except Exception as e:
+        logger.error(f"Error censurar-campos: {e}")
+        return {"campos": [], "error": str(e)}
+
+
 @router.get("/ping")
 async def ping():
     return {"ok": True, "service": "cabildoos-api"}
