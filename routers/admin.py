@@ -1,9 +1,6 @@
 import logging
 import os
-import smtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import httpx
 from fastapi import APIRouter, HTTPException, Depends, Header
 from typing import Optional, List
 from supabase import Client
@@ -105,23 +102,15 @@ async def get_verification(
 
 def _enviar_email(to_email: str, subject: str, body: str):
     """
-    Envía un email vía SMTP.
-    Variables de entorno requeridas:
-      SMTP_HOST, SMTP_PORT (default 587), SMTP_USER, SMTP_PASS, SMTP_FROM
+    Envía un email vía Resend (https://resend.com).
+    Variable de entorno requerida: RESEND_API_KEY
+    Variable opcional: RESEND_FROM (default: verificacion@cabildoos.com)
     """
-    host    = os.environ.get("SMTP_HOST", "")
-    port    = int(os.environ.get("SMTP_PORT", "587"))
-    user    = os.environ.get("SMTP_USER", "")
-    passwd  = os.environ.get("SMTP_PASS", "")
-    from_   = os.environ.get("SMTP_FROM", user)
+    api_key  = os.environ.get("RESEND_API_KEY", "")
+    from_    = os.environ.get("RESEND_FROM", "CabildoOS Verificación <verificacion@cabildoos.com>")
 
-    if not host or not user or not passwd:
-        raise ValueError("SMTP no configurado (SMTP_HOST, SMTP_USER, SMTP_PASS)")
-
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = f"CabildoOS Verificación <{from_}>"
-    msg["To"]      = to_email
+    if not api_key:
+        raise ValueError("RESEND_API_KEY no configurada")
 
     html_body = f"""
     <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a">
@@ -133,20 +122,28 @@ def _enviar_email(to_email: str, subject: str, body: str):
         <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
         <p style="margin:0;font-size:12px;color:#888">
           Este mensaje fue enviado por el equipo de verificación de CabildoOS.<br>
-          No respondas a este email — ingresá a <a href="https://cabildoos.pages.dev" style="color:#f76a1e">cabildoos.pages.dev</a> para reenviar tu solicitud.
+          No respondas a este email — ingresá a
+          <a href="https://cabildoos.pages.dev" style="color:#f76a1e">cabildoos.pages.dev</a>
+          para reenviar tu solicitud.
         </p>
       </div>
     </div>
     """
-    msg.attach(MIMEText(html_body, "html"))
-    msg.attach(MIMEText(body, "plain"))
 
-    ctx = ssl.create_default_context()
-    with smtplib.SMTP(host, port) as server:
-        server.ehlo()
-        server.starttls(context=ctx)
-        server.login(user, passwd)
-        server.sendmail(from_, to_email, msg.as_string())
+    with httpx.Client(timeout=15) as client:
+        resp = client.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "from":    from_,
+                "to":      [to_email],
+                "subject": subject,
+                "html":    html_body,
+                "text":    body,
+            },
+        )
+    if resp.status_code not in (200, 201):
+        raise RuntimeError(f"Resend error {resp.status_code}: {resp.text}")
 
 
 @router.post("/verifications/{vid}/contact")
