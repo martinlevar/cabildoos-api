@@ -77,8 +77,11 @@ async def endpoint_verificar_documento(
     # La imagen y los datos personales se descartan aquí — nunca se persisten
 
     # ── Guardar hash (anti-duplicado) y resultado en DB ───────────────────────
+    # pais_coincide es obligatorio cuando el usuario declaró un país
+    pais_ok = extracted.pais_coincide if req.pais_declarado else True
     match = (extracted.nombre_coincide and extracted.numero_coincide
-             and extracted.fecha_coincide and extracted.es_documento_real)
+             and extracted.fecha_coincide and extracted.es_documento_real
+             and pais_ok)
     try:
         supabase.table("verifications").upsert({
             "id":       req.verification_id,

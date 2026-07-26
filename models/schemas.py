@@ -34,10 +34,12 @@ class DocumentoExtraido(BaseModel):
     numero_documento: Optional[str] = None
     fecha_nacimiento: Optional[str] = None
     tipo_documento: Optional[str] = None
+    pais_emisor: Optional[str] = None       # país extraído del documento
     es_documento_real: bool = False
     nombre_coincide: bool = False
     numero_coincide: bool = False
     fecha_coincide: bool = False
+    pais_coincide: bool = False             # país declarado == país del documento
     confianza: float = 0.0
     observaciones: Optional[str] = None
 

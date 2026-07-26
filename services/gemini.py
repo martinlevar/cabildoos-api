@@ -81,7 +81,7 @@ El usuario declaró:
 - Nombre: {nombre_declarado}
 - Apellido: {apellido_declarado}
 - Número de documento: {numero_declarado}
-- País emisor: {pais_declarado or 'no especificado'}
+- Nacionalidad / País emisor: {pais_declarado or 'no especificado'}
 - Fecha de nacimiento: {fecha_nac_declarada or 'no especificada'}
 
 Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional ni markdown:
@@ -91,12 +91,14 @@ Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional
   "numero_documento": "número EXACTO como aparece (con o sin puntos), null si no es legible",
   "fecha_nacimiento": "DD/MM/YYYY exacto como aparece, null si no es legible",
   "tipo_documento": "{tipo_doc}",
-  "es_documento_real": true si es un documento físico real fotografiado, false si es una pantalla o imagen digital,
+  "pais_emisor": "país que emitió el documento según lo que aparece en él, en español y en su forma completa (ej: Venezuela, Argentina, Chile, Colombia). null si no es legible",
+  "es_documento_real": true si es un documento físico real fotografiado (no una pantalla, no una fotocopia, no una imagen digital),
   "nombre_coincide": true si el nombre+apellido del documento coincide con "{nombre_declarado} {apellido_declarado}" (ignorá mayúsculas/minúsculas y acentos),
   "numero_coincide": true si el número del documento coincide con "{numero_declarado}" (ignorá puntos y espacios),
   "fecha_coincide": true si la fecha de nacimiento del documento coincide con "{fecha_nac_declarada}" (ignorá formato, comparar día/mes/año). Si no se declaró fecha, devolver false,
+  "pais_coincide": true si el país emisor del documento coincide con "{pais_declarado}" (aceptá variantes: venezolano=Venezuela, argentino=Argentina, etc). Si el usuario no declaró país, devolver false,
   "confianza": número entre 0.0 y 1.0 indicando qué tan legible está el documento,
-  "observaciones": "breve descripción de lo que ves y cualquier problema con la foto"
+  "observaciones": "breve descripción de lo que ves, el país detectado, y cualquier problema con la foto"
 }}"""
 
     try:
