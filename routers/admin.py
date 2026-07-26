@@ -61,6 +61,122 @@ async def get_stats(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/users")
+async def list_users(
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Lista todos los usuarios registrados con su estado de verificación.
+    Usa la Admin API de Supabase (requiere SUPABASE_SERVICE_ROLE_KEY).
+    """
+    import os
+    project_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+    if not service_key:
+        raise HTTPException(status_code=503, detail="SUPABASE_SERVICE_ROLE_KEY no configurada")
+
+    # 1. Obtener todos los auth.users via Admin API
+    auth_users = {}
+    try:
+        page = 1
+        while True:
+            resp = httpx.get(
+                f"{project_url}/auth/v1/admin/users?page={page}&per_page=1000",
+                headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+                timeout=15,
+            )
+            data = resp.json()
+            batch = data.get("users", [])
+            for u in batch:
+                auth_users[u["id"]] = {
+                    "id": u["id"],
+                    "email": u.get("email", ""),
+                    "created_at": u.get("created_at", ""),
+                    "confirmed": bool(u.get("email_confirmed_at")),
+                    "last_sign_in": u.get("last_sign_in_at"),
+                }
+            if len(batch) < 1000:
+                break
+            page += 1
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error consultando auth users: {e}")
+
+    # 2. Profiles (alias + seat_number)
+    profiles_res = supabase.table("profiles").select("id, alias, seat_number").execute()
+    profiles = {p["id"]: p for p in (profiles_res.data or [])}
+
+    # 3. Verifications (para saber estado)
+    verif_res = supabase.table("verifications").select("contact_email, status, butaca_numero").execute()
+    verif_by_email = {}
+    for v in (verif_res.data or []):
+        email = v.get("contact_email")
+        if email:
+            verif_by_email[email] = v
+
+    # 4. Combinar
+    result = []
+    for uid, u in auth_users.items():
+        p = profiles.get(uid, {})
+        v = verif_by_email.get(u["email"], {})
+        status = "verificado" if p.get("seat_number") else (v.get("status") or "sin_verificar")
+        result.append({
+            "id":          uid,
+            "email":       u["email"],
+            "alias":       p.get("alias", u["email"].split("@")[0]),
+            "created_at":  u["created_at"],
+            "confirmed":   u["confirmed"],
+            "last_sign_in": u["last_sign_in"],
+            "seat_number": p.get("seat_number"),
+            "status":      status,
+        })
+
+    result.sort(key=lambda x: x["created_at"], reverse=True)
+    return result
+
+
+@router.post("/users/{uid}/remind")
+async def remind_user(
+    uid: str,
+    body: dict,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Envía un email de recordatorio al usuario para que complete su verificación.
+    Body: { "email": "...", "mensaje": "..." (opcional) }
+    """
+    import asyncio
+    email   = (body.get("email") or "").strip()
+    alias   = (body.get("alias") or "usuario").strip()
+    mensaje = (body.get("mensaje") or "").strip()
+
+    if not email:
+        raise HTTPException(status_code=400, detail="Email requerido")
+
+    cuerpo = mensaje or f"""Hola {alias},
+
+Te escribimos desde CabildoOS para recordarte que aún no completaste tu verificación de identidad.
+
+La verificación es rápida (menos de 2 minutos) y te permite participar en el hemiciclo democrático como ciudadano verificado.
+
+Para verificarte, ingresá a cabildoos.pages.dev y hacé clic en "Verificar identidad".
+
+¡Te esperamos!"""
+
+    try:
+        await asyncio.to_thread(
+            _enviar_email,
+            email,
+            "CabildoOS — Completá tu verificación de identidad",
+            cuerpo,
+        )
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/verifications", response_model=List[VerificationRecord])
 async def list_verifications(
     status: Optional[str] = None,
