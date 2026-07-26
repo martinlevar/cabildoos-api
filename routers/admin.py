@@ -154,23 +154,28 @@ async def contact_user(
     supabase: Client = Depends(get_supabase),
 ):
     """
-    Envía un email al usuario pidiendo más información.
+    Pide más info al usuario:
+    1. Guarda todo en contact_requests (audit trail)
+    2. Envía el email
+    3. Elimina el registro de verifications (libera el doc_hash para que pueda reverificarse)
     Body: { "mensaje": "..." }
     """
+    import asyncio
     mensaje = (body.get("mensaje") or "").strip()
     if not mensaje:
         raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
 
-    # Obtener email de contacto de la verificación
+    # 1. Obtener todos los datos de la verificación antes de borrar
     try:
         res = supabase.table("verifications") \
-            .select("contact_email, status") \
+            .select("id, contact_email, doc_face_url, selfie_doc_url, doc_match, doc_hash, status") \
             .eq("id", vid) \
             .single() \
             .execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Verificación no encontrada")
-        contact_email = res.data.get("contact_email")
+        v = res.data
+        contact_email = v.get("contact_email")
         if not contact_email:
             raise HTTPException(status_code=400, detail="El usuario no proporcionó email de contacto")
     except HTTPException:
@@ -178,25 +183,113 @@ async def contact_user(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # Enviar email
+    # 2. Guardar en contact_requests (audit trail permanente)
     try:
-        import asyncio
+        cr = supabase.table("contact_requests").insert({
+            "verification_id": vid,
+            "contact_email":   contact_email,
+            "doc_face_url":    v.get("doc_face_url"),
+            "selfie_doc_url":  v.get("selfie_doc_url"),
+            "doc_match":       v.get("doc_match"),
+            "doc_hash":        v.get("doc_hash"),
+            "mensaje_inicial": mensaje,
+            "status":          "esperando",
+            "notas":           [],
+        }).execute()
+        cr_id = cr.data[0]["id"] if cr.data else None
+        logger.info(f"contact_request creado: {cr_id}")
+    except Exception as e:
+        logger.error(f"Error creando contact_request: {e}")
+        raise HTTPException(status_code=500, detail=f"Error guardando registro: {e}")
+
+    # 3. Enviar email
+    try:
         await asyncio.to_thread(
             _enviar_email,
             contact_email,
             "CabildoOS — Tu solicitud de verificación necesita más información",
             mensaje,
         )
-        supabase.table("verifications").update({
-            "status": "info_requerida",
-        }).eq("id", vid).execute()
-        logger.info(f"Email enviado a {contact_email} para verificación {vid}")
-        return {"ok": True, "enviado_a": contact_email}
-    except ValueError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        logger.info(f"Email enviado a {contact_email}")
     except Exception as e:
+        # Si falla el email, no borramos el registro
         logger.error(f"Error enviando email: {e}")
         raise HTTPException(status_code=500, detail=f"Error al enviar email: {e}")
+
+    # 4. Eliminar de verifications (libera el doc_hash para reverificación)
+    try:
+        supabase.table("verifications").delete().eq("id", vid).execute()
+        logger.info(f"Verificación {vid} eliminada — doc_hash liberado")
+    except Exception as e:
+        logger.warning(f"Email enviado pero error al eliminar verificación: {e}")
+
+    return {"ok": True, "enviado_a": contact_email, "contact_request_id": cr_id}
+
+
+@router.get("/contact-requests")
+async def list_contact_requests(
+    status: Optional[str] = None,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Lista todos los pedidos de más información con su historial."""
+    try:
+        q = supabase.table("contact_requests") \
+            .select("*") \
+            .order("created_at", desc=True)
+        if status:
+            q = q.eq("status", status)
+        res = q.execute()
+        return res.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/contact-requests/{crid}/nota")
+async def agregar_nota(
+    crid: str,
+    body: dict,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Agrega una nota de seguimiento a un contact_request."""
+    from datetime import datetime, timezone
+    texto = (body.get("texto") or "").strip()
+    if not texto:
+        raise HTTPException(status_code=400, detail="Nota vacía")
+    try:
+        res = supabase.table("contact_requests").select("notas").eq("id", crid).single().execute()
+        notas = res.data.get("notas") or []
+        notas.append({"texto": texto, "ts": datetime.now(timezone.utc).isoformat()})
+        supabase.table("contact_requests").update({
+            "notas":      notas,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", crid).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/contact-requests/{crid}/status")
+async def actualizar_status_cr(
+    crid: str,
+    body: dict,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Actualiza el status de un contact_request (aprobado, rechazado, cerrado, etc.)."""
+    from datetime import datetime, timezone
+    new_status = body.get("status")
+    if new_status not in ("esperando", "re_enviado", "aprobado", "rechazado", "cerrado"):
+        raise HTTPException(status_code=400, detail="Status inválido")
+    try:
+        supabase.table("contact_requests").update({
+            "status":     new_status,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", crid).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.patch("/verifications/{vid}/review")
