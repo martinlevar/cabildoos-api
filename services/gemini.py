@@ -1,10 +1,12 @@
 import asyncio
 import base64
+import io
 import json
 import re
 import logging
 from typing import Optional
 import google.generativeai as genai
+from PIL import Image
 
 from models.schemas import DocumentoExtraido
 
@@ -49,6 +51,75 @@ def _call_gemini(prompt: str, image_b64: str) -> str:
     }
     response = model.generate_content([prompt, image_part])
     return response.text.strip()
+
+
+def _crop_b64(image_b64: str, bbox: dict) -> str:
+    """
+    Recorta una región de una imagen base64 y devuelve el recorte como base64.
+    bbox tiene x1, y1, x2, y2 como fracciones (0.0–1.0).
+    """
+    img_bytes = base64.b64decode(image_b64)
+    img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    w, h = img.size
+
+    x1 = int(bbox["x1"] * w)
+    y1 = int(bbox["y1"] * h)
+    x2 = int(bbox["x2"] * w)
+    y2 = int(bbox["y2"] * h)
+
+    # Pequeño margen
+    pad = int(min(w, h) * 0.02)
+    x1 = max(0, x1 - pad)
+    y1 = max(0, y1 - pad)
+    x2 = min(w, x2 + pad)
+    y2 = min(h, y2 + pad)
+
+    if x2 <= x1 or y2 <= y1:
+        return image_b64  # fallback: imagen completa
+
+    face = img.crop((x1, y1, x2, y2))
+    buf = io.BytesIO()
+    face.save(buf, format="JPEG", quality=88)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+async def extraer_cara_documento(image_b64: str) -> Optional[str]:
+    """
+    Detecta la foto del rostro incrustada en el documento de identidad.
+    Retorna la cara recortada como base64, o None si no la detecta.
+    """
+    prompt = """This is a photo of an identity document (DNI, cedula, passport, ID card, or driver's license).
+
+Find the portrait photo of the person printed on the document — the small embedded face/headshot photo that appears on identity cards.
+
+Return ONLY valid JSON, no extra text:
+{
+  "face": {
+    "x1": 0.05,
+    "y1": 0.10,
+    "x2": 0.25,
+    "y2": 0.55
+  }
+}
+
+x1,y1 = top-left corner of the face photo on the document (as fractions of total image width/height)
+x2,y2 = bottom-right corner
+
+If no embedded face photo is clearly visible, return: {"face": null}"""
+
+    try:
+        raw = await asyncio.to_thread(_call_gemini, prompt, image_b64)
+        data = _extract_json(raw)
+        bbox = data.get("face")
+        if not bbox:
+            logger.info("extraer_cara_documento: no face detected")
+            return None
+        cropped = _crop_b64(image_b64, bbox)
+        logger.info(f"extraer_cara_documento: cropped face bbox={bbox}")
+        return cropped
+    except Exception as e:
+        logger.warning(f"extraer_cara_documento error: {e}")
+        return None
 
 
 async def verificar_documento(

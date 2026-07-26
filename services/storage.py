@@ -53,3 +53,9 @@ def upload_selfie_liveness(supabase: Client, verification_id: str, b64: str) -> 
 def upload_selfie_doc(supabase: Client, verification_id: str, b64: str) -> str:
     path = f"{verification_id}/selfie_documento.jpg"
     return upload_b64(supabase, b64, path)
+
+
+def upload_doc_face(supabase: Client, verification_id: str, b64: str) -> str:
+    """Foto del rostro extraída del documento de identidad."""
+    path = f"{verification_id}/doc_face.jpg"
+    return upload_b64(supabase, b64, path)

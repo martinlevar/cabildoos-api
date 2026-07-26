@@ -11,8 +11,8 @@ from models.schemas import (
     SubmitVerificacionRequest, SubmitVerificacionResponse,
     DocumentoExtraido,
 )
-from services.gemini import verificar_documento
-from services.storage import upload_documento, upload_selfie_liveness, upload_selfie_doc
+from services.gemini import verificar_documento, extraer_cara_documento
+from services.storage import upload_documento, upload_selfie_liveness, upload_selfie_doc, upload_doc_face
 from services.supabase_client import get_supabase
 
 router = APIRouter(prefix="/api/verify", tags=["verificacion"])
@@ -64,33 +64,52 @@ async def endpoint_verificar_documento(
     except Exception as e:
         logger.warning(f"Error verificando duplicado: {e}")
 
-    # ── Llamar a Gemini Vision ────────────────────────────────────────────────
-    extracted = await verificar_documento(
-        image_b64=req.image_b64,
-        tipo_doc=req.tipo_doc,
-        nombre_declarado=req.nombre_declarado,
-        apellido_declarado=req.apellido_declarado,
-        numero_declarado=req.numero_declarado,
-        pais_declarado=req.pais_declarado or "",
-        fecha_nac_declarada=req.fecha_nac_declarada or "",
+    import asyncio
+
+    # ── Llamar a Gemini Vision (verificación) + extracción de cara en paralelo ─
+    extracted, face_b64 = await asyncio.gather(
+        verificar_documento(
+            image_b64=req.image_b64,
+            tipo_doc=req.tipo_doc,
+            nombre_declarado=req.nombre_declarado,
+            apellido_declarado=req.apellido_declarado,
+            numero_declarado=req.numero_declarado,
+            pais_declarado=req.pais_declarado or "",
+            fecha_nac_declarada=req.fecha_nac_declarada or "",
+        ),
+        extraer_cara_documento(req.image_b64),
     )
-    # La imagen y los datos personales se descartan aquí — nunca se persisten
 
     # ── Guardar hash (anti-duplicado) y resultado en DB ───────────────────────
-    # pais_coincide es obligatorio cuando el usuario declaró un país
     pais_ok = extracted.pais_coincide if req.pais_declarado else True
     match = (extracted.nombre_coincide and extracted.numero_coincide
              and extracted.fecha_coincide and extracted.es_documento_real
              and pais_ok)
     try:
         supabase.table("verifications").upsert({
-            "id":       req.verification_id,
-            "doc_hash": doc_hash,   # hash unidireccional — no el número real
+            "id":        req.verification_id,
+            "doc_hash":  doc_hash,
             "doc_match": match,
-            "status":   "en_proceso",
+            "status":    "en_proceso",
         }).execute()
     except Exception as e:
         logger.warning(f"Error guardando hash: {e}")
+
+    # ── Subir foto del rostro del documento en background ────────────────────
+    if face_b64:
+        async def _upload_face():
+            try:
+                url = await asyncio.to_thread(
+                    upload_doc_face, supabase, req.verification_id, face_b64
+                )
+                supabase.table("verifications").update(
+                    {"doc_face_url": url}
+                ).eq("id", req.verification_id).execute()
+                logger.info(f"doc_face subida: {url[:60]}...")
+            except Exception as e:
+                logger.error(f"Error subiendo doc_face: {e}")
+        asyncio.create_task(_upload_face())
+    # La imagen original y los datos personales se descartan aquí — no se persisten
 
     return VerificarDocumentoResponse(
         ok=True,
