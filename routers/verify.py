@@ -51,8 +51,8 @@ async def endpoint_verificar_documento(
             .execute()
         if existing.data:
             rec = existing.data[0]
-            if rec["status"] == "rechazado":
-                # Permitir reintento — limpiar el registro anterior
+            if rec["status"] in ("rechazado", "en_proceso"):
+                # Permitir reintento — limpiar el registro anterior incompleto o rechazado
                 supabase.table("verifications").delete().eq("doc_hash", doc_hash).execute()
             else:
                 raise HTTPException(
