@@ -60,6 +60,8 @@ class SubmitVerificacionRequest(BaseModel):
     selfie_doc_b64: str
     # Resultado booleano del análisis Gemini (sin datos personales)
     gemini_match: bool = False
+    # Email de contacto — solo para que el verificador pueda pedir más info
+    contact_email: Optional[str] = None
 
 
 class SubmitVerificacionResponse(BaseModel):

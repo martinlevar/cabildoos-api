@@ -161,11 +161,14 @@ async def endpoint_submit_verificacion(
 
     # Guardar en DB primero — responder rápido al cliente
     try:
-        supabase.table("verifications").upsert({
+        row = {
             "id":        req.verification_id,
             "status":    "pendiente_revision",
             "doc_match": req.gemini_match,
-        }).execute()
+        }
+        if req.contact_email:
+            row["contact_email"] = req.contact_email.strip().lower()
+        supabase.table("verifications").upsert(row).execute()
         logger.info(f"Verificación guardada: {req.verification_id}")
     except Exception as e:
         logger.error(f"Error DB: {e}")

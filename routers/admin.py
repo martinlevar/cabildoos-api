@@ -1,4 +1,9 @@
 import logging
+import os
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from fastapi import APIRouter, HTTPException, Depends, Header
 from typing import Optional, List
 from supabase import Client
@@ -96,6 +101,105 @@ async def get_verification(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _enviar_email(to_email: str, subject: str, body: str):
+    """
+    Envía un email vía SMTP.
+    Variables de entorno requeridas:
+      SMTP_HOST, SMTP_PORT (default 587), SMTP_USER, SMTP_PASS, SMTP_FROM
+    """
+    host    = os.environ.get("SMTP_HOST", "")
+    port    = int(os.environ.get("SMTP_PORT", "587"))
+    user    = os.environ.get("SMTP_USER", "")
+    passwd  = os.environ.get("SMTP_PASS", "")
+    from_   = os.environ.get("SMTP_FROM", user)
+
+    if not host or not user or not passwd:
+        raise ValueError("SMTP no configurado (SMTP_HOST, SMTP_USER, SMTP_PASS)")
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = f"CabildoOS Verificación <{from_}>"
+    msg["To"]      = to_email
+
+    html_body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a">
+      <div style="background:#f76a1e;padding:24px;border-radius:10px 10px 0 0">
+        <h2 style="margin:0;color:#fff;font-size:20px">◈ CabildoOS — Verificación de Identidad</h2>
+      </div>
+      <div style="background:#f9f9f9;padding:28px;border-radius:0 0 10px 10px;border:1px solid #eee;border-top:none">
+        <p style="margin:0 0 16px;font-size:15px">{body.replace(chr(10), '<br>')}</p>
+        <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
+        <p style="margin:0;font-size:12px;color:#888">
+          Este mensaje fue enviado por el equipo de verificación de CabildoOS.<br>
+          No respondas a este email — ingresá a <a href="https://cabildoos.pages.dev" style="color:#f76a1e">cabildoos.pages.dev</a> para reenviar tu solicitud.
+        </p>
+      </div>
+    </div>
+    """
+    msg.attach(MIMEText(html_body, "html"))
+    msg.attach(MIMEText(body, "plain"))
+
+    ctx = ssl.create_default_context()
+    with smtplib.SMTP(host, port) as server:
+        server.ehlo()
+        server.starttls(context=ctx)
+        server.login(user, passwd)
+        server.sendmail(from_, to_email, msg.as_string())
+
+
+@router.post("/verifications/{vid}/contact")
+async def contact_user(
+    vid: str,
+    body: dict,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Envía un email al usuario pidiendo más información.
+    Body: { "mensaje": "..." }
+    """
+    mensaje = (body.get("mensaje") or "").strip()
+    if not mensaje:
+        raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
+
+    # Obtener email de contacto de la verificación
+    try:
+        res = supabase.table("verifications") \
+            .select("contact_email, status") \
+            .eq("id", vid) \
+            .single() \
+            .execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Verificación no encontrada")
+        contact_email = res.data.get("contact_email")
+        if not contact_email:
+            raise HTTPException(status_code=400, detail="El usuario no proporcionó email de contacto")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Enviar email
+    try:
+        import asyncio
+        await asyncio.to_thread(
+            _enviar_email,
+            contact_email,
+            "CabildoOS — Tu solicitud de verificación necesita más información",
+            mensaje,
+        )
+        supabase.table("verifications").update({
+            "status": "info_requerida",
+        }).eq("id", vid).execute()
+        logger.info(f"Email enviado a {contact_email} para verificación {vid}")
+        return {"ok": True, "enviado_a": contact_email}
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error enviando email: {e}")
+        raise HTTPException(status_code=500, detail=f"Error al enviar email: {e}")
 
 
 @router.patch("/verifications/{vid}/review")
