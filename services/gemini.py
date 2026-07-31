@@ -63,6 +63,46 @@ def init_gemini(api_key: str):
     genai.configure(api_key=api_key)
 
 
+# ── Normalización de países ────────────────────────────────────────────────────
+_PAIS_VARIANTES: dict[str, list[str]] = {
+    "argentina":  ["argentina", "argentino", "argentinas", "republica argentina", "republic of argentina"],
+    "venezuela":  ["venezuela", "venezolano", "bolivariana", "republica bolivariana"],
+    "colombia":   ["colombia", "colombiano", "colombiana", "republica de colombia"],
+    "chile":      ["chile", "chileno", "chilena", "republica de chile"],
+    "peru":       ["peru", "peruano", "peruana", "republica del peru"],
+    "mexico":     ["mexico", "mexicano", "mexicana", "estados unidos mexicanos"],
+    "ecuador":    ["ecuador", "ecuatoriano", "ecuatoriana", "republica del ecuador"],
+    "bolivia":    ["bolivia", "boliviano", "boliviana", "estado plurinacional de bolivia"],
+    "uruguay":    ["uruguay", "uruguayo", "uruguaya", "republica oriental del uruguay"],
+    "paraguay":   ["paraguay", "paraguayo", "paraguaya", "republica del paraguay"],
+    "brasil":     ["brasil", "brazil", "brasileiro", "brasileira", "republica federativa do brasil"],
+    "espana":     ["espana", "espanol", "espanola", "reino de espana"],
+    "usa":        ["united states", "usa", "america", "estados unidos"],
+}
+
+def _norm(s: str) -> str:
+    """Normaliza un string de país: lowercase, sin acentos, sin espacios extra."""
+    import unicodedata
+    s = unicodedata.normalize("NFD", s.lower().strip())
+    return "".join(c for c in s if unicodedata.category(c) != "Mn")
+
+def _paises_coinciden(pais_declarado: str, pais_emisor: str) -> bool:
+    """Compara países tolerando variantes, acentos y prefijos ('República', etc.)."""
+    if not pais_declarado or not pais_emisor:
+        return False
+    pd = _norm(pais_declarado)
+    pe = _norm(pais_emisor)
+    if pd == pe:
+        return True
+    # Buscar canónico del país declarado
+    canon = next((c for c, vs in _PAIS_VARIANTES.items() if pd == c or pd in vs), None)
+    if canon is None:
+        # País desconocido — comparación por substring
+        return pd in pe or pe in pd
+    variantes = _PAIS_VARIANTES[canon]
+    return canon in pe or any(v in pe for v in variantes)
+
+
 def _extract_json(text: str) -> dict:
     """Extrae el primer bloque JSON de la respuesta del modelo."""
     try:
@@ -201,7 +241,7 @@ async def verificar_documento(
     }
     desc_tipo = nombres_tipos.get(tipo_doc, tipo_doc)
 
-    prompt = f"""Sos un sistema experto en verificación de documentos de identidad.
+    prompt = f"""Sos un sistema experto en verificación de documentos de identidad latinoamericanos.
 
 Se te presenta la foto de un {desc_tipo}.
 
@@ -212,6 +252,12 @@ El usuario declaró:
 - Nacionalidad / País emisor: {pais_declarado or 'no especificado'}
 - Fecha de nacimiento: {fecha_nac_declarada or 'no especificada'}
 
+INSTRUCCIONES IMPORTANTES:
+1. Para el DNI argentino: el encabezado dice "REPUBLICA ARGENTINA" o puede incluir "MERCOSUR". MERCOSUR NO es un país — es solo el estándar de formato del documento. El país emisor es SIEMPRE Argentina en ese caso.
+2. El campo "Nacionalidad / Nationality" en el documento indica la nacionalidad del titular, NO el país emisor. Ambos suelen coincidir, pero usá el encabezado del documento para determinar el país emisor.
+3. Para pais_emisor devolvé SOLO el nombre del país en español, sin prefijos ("Argentina", no "República Argentina").
+4. Documentos con hologramas, reflejos o efectos de seguridad siguen siendo documentos reales — no los descartés como falsos por eso.
+
 Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional ni markdown:
 
 {{
@@ -219,12 +265,12 @@ Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional
   "numero_documento": "número EXACTO como aparece (con o sin puntos), null si no es legible",
   "fecha_nacimiento": "DD/MM/YYYY exacto como aparece, null si no es legible",
   "tipo_documento": "{tipo_doc}",
-  "pais_emisor": "país que emitió el documento según lo que aparece en él, en español y en su forma completa (ej: Venezuela, Argentina, Chile, Colombia). null si no es legible",
-  "es_documento_real": true si es un documento físico real fotografiado (no una pantalla, no una fotocopia, no una imagen digital),
+  "pais_emisor": "SOLO el nombre del país en español (ej: 'Argentina', 'Venezuela', 'Colombia'). Si el encabezado dice REPUBLICA ARGENTINA o ARGENTINA, devolvé 'Argentina'. null si no es legible",
+  "es_documento_real": true si es un documento físico real fotografiado (incluyendo documentos con hologramas y efectos de seguridad),
   "nombre_coincide": true si el nombre+apellido del documento coincide con "{nombre_declarado} {apellido_declarado}" (ignorá mayúsculas/minúsculas y acentos),
   "numero_coincide": true si el número del documento coincide con "{numero_declarado}" (ignorá puntos y espacios),
   "fecha_coincide": true si la fecha de nacimiento del documento coincide con "{fecha_nac_declarada}" (ignorá formato, comparar día/mes/año). Si no se declaró fecha, devolver false,
-  "pais_coincide": true si el país emisor del documento coincide con "{pais_declarado}" (aceptá variantes: venezolano=Venezuela, argentino=Argentina, etc). Si el usuario no declaró país, devolver false,
+  "pais_coincide": true si pais_emisor coincide con "{pais_declarado}" (Argentina=Argentina, venezolano=Venezuela, etc). Si no se declaró país, devolver true,
   "confianza": número entre 0.0 y 1.0 indicando qué tan legible está el documento,
   "observaciones": "breve descripción de lo que ves, el país detectado, y cualquier problema con la foto"
 }}"""
@@ -236,6 +282,23 @@ Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional
 
         data = _extract_json(raw)
         logger.info(f"Gemini parsed: {data}")
+
+        # ── Normalización server-side de pais_coincide ────────────────────────
+        # Gemini a veces falla la comparación aunque extrajo el país correcto.
+        # Si tenemos pais_emisor y pais_declarado, comparamos nosotros mismos y
+        # sobreescribimos el campo — esto es más confiable que el razonamiento del modelo.
+        if pais_declarado and data.get("pais_emisor"):
+            coincide = _paises_coinciden(pais_declarado, data["pais_emisor"])
+            if coincide != data.get("pais_coincide"):
+                logger.info(
+                    f"pais_coincide corregido: Gemini={data.get('pais_coincide')} "
+                    f"→ server={coincide} "
+                    f"(declarado='{pais_declarado}', emisor='{data['pais_emisor']}')"
+                )
+            data["pais_coincide"] = coincide
+        elif not pais_declarado:
+            # Sin país declarado, no bloqueamos
+            data["pais_coincide"] = True
 
         return DocumentoExtraido(**{
             k: data.get(k)
