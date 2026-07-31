@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 # ── Métricas en memoria (se resetean con cada deploy / reinicio de Render) ────
 _GEMINI_MODEL = "gemini-2.0-flash"
 
+# Límites diarios por modelo (free tier). En paid no hay límite RPD, solo TPM.
+# Se puede sobreescribir con GEMINI_DAILY_LIMIT env var.
+_GEMINI_DEFAULT_LIMITS = {
+    "gemini-2.0-flash":      1500,
+    "gemini-2.0-flash-lite": 1500,
+    "gemini-1.5-flash":      1500,
+    "gemini-1.5-pro":        50,
+    "gemini-pro":            50,
+}
+
 _stats: dict = {
     "requests_today":  0,
     "errors_today":    0,
@@ -27,9 +37,14 @@ _stats: dict = {
 }
 
 def get_gemini_stats() -> dict:
+    import os
+    # GEMINI_DAILY_LIMIT env var sobreescribe el default del modelo
+    env_limit = os.environ.get("GEMINI_DAILY_LIMIT")
+    daily_limit = int(env_limit) if env_limit else _GEMINI_DEFAULT_LIMITS.get(_GEMINI_MODEL, 1500)
     return {
         **_stats,
-        "model": _GEMINI_MODEL,
+        "model":       _GEMINI_MODEL,
+        "daily_limit": daily_limit,
         "uptime_since": _stats["started_at"],
     }
 
