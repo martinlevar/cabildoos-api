@@ -7,6 +7,7 @@ from supabase import Client
 
 from models.schemas import VerificationRecord, StatsResponse
 from services.supabase_client import get_supabase
+from services.gemini import get_gemini_stats
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 logger = logging.getLogger(__name__)
@@ -20,6 +21,12 @@ def _verificar_admin(authorization: Optional[str] = Header(None)):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Token requerido")
     return authorization.split(" ")[1]
+
+
+@router.get("/status/gemini")
+async def gemini_status(token: str = Depends(_verificar_admin)):
+    """Métricas de uso de Gemini AI (contadores en memoria desde el último deploy)."""
+    return get_gemini_stats()
 
 
 @router.get("/stats", response_model=StatsResponse)

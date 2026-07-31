@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import verify, admin
-from services.gemini import init_gemini
+from services.gemini import init_gemini, get_gemini_stats
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,4 +67,10 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"ok": True}
+    gs = get_gemini_stats()
+    return {
+        "ok":           True,
+        "version":      "1.0.0",
+        "gemini_model": gs["model"],
+        "status":       "ok",
+    }

@@ -4,6 +4,7 @@ import io
 import json
 import re
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 import google.generativeai as genai
 from PIL import Image
@@ -11,6 +12,36 @@ from PIL import Image
 from models.schemas import DocumentoExtraido
 
 logger = logging.getLogger(__name__)
+
+# ── Métricas en memoria (se resetean con cada deploy / reinicio de Render) ────
+_GEMINI_MODEL = "gemini-2.0-flash"
+
+_stats: dict = {
+    "requests_today":  0,
+    "errors_today":    0,
+    "tokens_in":       0,
+    "tokens_out":      0,
+    "last_request_at": None,
+    "last_error":      None,
+    "started_at":      datetime.now(timezone.utc).isoformat(),
+}
+
+def get_gemini_stats() -> dict:
+    return {
+        **_stats,
+        "model": _GEMINI_MODEL,
+        "uptime_since": _stats["started_at"],
+    }
+
+def _record_call(tokens_in: int = 0, tokens_out: int = 0):
+    _stats["requests_today"]  += 1
+    _stats["tokens_in"]       += tokens_in
+    _stats["tokens_out"]      += tokens_out
+    _stats["last_request_at"]  = datetime.now(timezone.utc).isoformat()
+
+def _record_error(msg: str):
+    _stats["errors_today"] += 1
+    _stats["last_error"]    = msg
 
 
 def init_gemini(api_key: str):
@@ -40,9 +71,8 @@ def _extract_json(text: str) -> dict:
 
 def _call_gemini(prompt: str, image_b64: str) -> str:
     """Llamada sincrónica a Gemini — se corre en thread separado."""
-    model = genai.GenerativeModel("gemini-3.5-flash")
+    model = genai.GenerativeModel(_GEMINI_MODEL)
 
-    # Pasar imagen directamente como inline_data (más confiable que PIL)
     image_part = {
         "inline_data": {
             "mime_type": "image/jpeg",
@@ -50,6 +80,17 @@ def _call_gemini(prompt: str, image_b64: str) -> str:
         }
     }
     response = model.generate_content([prompt, image_part])
+
+    # Registrar tokens si el SDK los expone
+    try:
+        usage = response.usage_metadata
+        _record_call(
+            tokens_in  = getattr(usage, "prompt_token_count",     0) or 0,
+            tokens_out = getattr(usage, "candidates_token_count", 0) or 0,
+        )
+    except Exception:
+        _record_call()
+
     return response.text.strip()
 
 
@@ -118,6 +159,7 @@ If no embedded face photo is clearly visible, return: {"face": null}"""
         logger.info(f"extraer_cara_documento: cropped face bbox={bbox}")
         return cropped
     except Exception as e:
+        _record_error(f"extraer_cara_documento: {e}")
         logger.warning(f"extraer_cara_documento error: {e}")
         return None
 
@@ -187,6 +229,7 @@ Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional
         })
 
     except Exception as e:
+        _record_error(f"verificar_documento: {type(e).__name__}: {e}")
         logger.error(f"Error Gemini: {type(e).__name__}: {e}")
         return DocumentoExtraido(
             es_documento_real=False,
