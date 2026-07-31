@@ -310,15 +310,15 @@ async def ping():
 async def test_gemini():
     """Lista los modelos disponibles con la API key configurada."""
     import os
-    import google.generativeai as genai
+    from google import genai as _genai
     api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         return {"ok": False, "error": "GEMINI_API_KEY no configurada"}
     try:
-        genai.configure(api_key=api_key)
+        client = _genai.Client(api_key=api_key)
         models = [
-            m.name for m in genai.list_models()
-            if "generateContent" in m.supported_generation_methods
+            m.name for m in client.models.list()
+            if any("generateContent" in (m.supported_actions or []))
         ]
         return {"ok": True, "modelos_disponibles": models}
     except Exception as e:

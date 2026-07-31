@@ -6,7 +6,8 @@ import re
 import logging
 from datetime import datetime, timezone
 from typing import Optional
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 from PIL import Image
 
 from models.schemas import DocumentoExtraido
@@ -59,8 +60,11 @@ def _record_error(msg: str):
     _stats["last_error"]    = msg
 
 
+_gemini_client: genai.Client | None = None
+
 def init_gemini(api_key: str):
-    genai.configure(api_key=api_key)
+    global _gemini_client
+    _gemini_client = genai.Client(api_key=api_key)
 
 
 # ── Normalización de países ────────────────────────────────────────────────────
@@ -126,15 +130,18 @@ def _extract_json(text: str) -> dict:
 
 def _call_gemini(prompt: str, image_b64: str) -> str:
     """Llamada sincrónica a Gemini — se corre en thread separado."""
-    model = genai.GenerativeModel(_GEMINI_MODEL)
+    client = _gemini_client
+    if client is None:
+        raise RuntimeError("Gemini client not initialized — llamar init_gemini() primero")
 
-    image_part = {
-        "inline_data": {
-            "mime_type": "image/jpeg",
-            "data": image_b64,
-        }
-    }
-    response = model.generate_content([prompt, image_part])
+    image_part = genai_types.Part.from_bytes(
+        data=base64.b64decode(image_b64),
+        mime_type="image/jpeg",
+    )
+    response = client.models.generate_content(
+        model=_GEMINI_MODEL,
+        contents=[prompt, image_part],
+    )
 
     # Registrar tokens si el SDK los expone
     try:
