@@ -284,10 +284,11 @@ Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional
         logger.info(f"Gemini parsed: {data}")
 
         # ── Normalización server-side de pais_coincide ────────────────────────
-        # Gemini a veces falla la comparación aunque extrajo el país correcto.
-        # Si tenemos pais_emisor y pais_declarado, comparamos nosotros mismos y
-        # sobreescribimos el campo — esto es más confiable que el razonamiento del modelo.
+        # Gemini a veces falla la comparación aunque extrajo el país correcto,
+        # o directamente devuelve pais_emisor null si hay hologramas/reflejos.
+        # Comparamos nosotros mismos — más confiable que el razonamiento del modelo.
         if pais_declarado and data.get("pais_emisor"):
+            # Caso normal: Gemini extrajo pais_emisor → comparamos server-side
             coincide = _paises_coinciden(pais_declarado, data["pais_emisor"])
             if coincide != data.get("pais_coincide"):
                 logger.info(
@@ -296,6 +297,26 @@ Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional
                     f"(declarado='{pais_declarado}', emisor='{data['pais_emisor']}')"
                 )
             data["pais_coincide"] = coincide
+        elif pais_declarado and not data.get("pais_emisor"):
+            # Gemini no pudo leer pais_emisor (hologramas, reflejos, foto oscura).
+            # Inferimos el país a partir del tipo_doc — DNI_AR siempre es Argentina, etc.
+            _DOC_PAIS_MAP: dict[str, str] = {
+                "DNI_AR":    "Argentina",
+                "LICENCIA":  "Argentina",
+                "CEDULA_VE": "Venezuela",
+            }
+            implied = _DOC_PAIS_MAP.get(tipo_doc, "")
+            if implied:
+                coincide = _paises_coinciden(pais_declarado, implied)
+                logger.info(
+                    f"pais_emisor=null → tipo_doc={tipo_doc} → implied='{implied}' → coincide={coincide} "
+                    f"(declarado='{pais_declarado}')"
+                )
+                data["pais_coincide"] = coincide
+            else:
+                # Tipo de doc desconocido + Gemini no leyó el país → no bloqueamos
+                logger.info(f"pais_emisor=null + tipo_doc desconocido '{tipo_doc}' → permissive true")
+                data["pais_coincide"] = True
         elif not pais_declarado:
             # Sin país declarado, no bloqueamos
             data["pais_coincide"] = True
