@@ -15,7 +15,7 @@ from models.schemas import DocumentoExtraido
 logger = logging.getLogger(__name__)
 
 # ── Métricas en memoria (se resetean con cada deploy / reinicio de Render) ────
-_GEMINI_MODEL = "gemini-2.5-flash"
+_GEMINI_MODEL = "gemini-flash-latest"
 
 # Límites diarios por modelo (free tier). En paid no hay límite RPD, solo TPM.
 # Se puede sobreescribir con GEMINI_DAILY_LIMIT env var.
