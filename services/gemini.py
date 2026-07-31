@@ -65,7 +65,7 @@ def init_gemini(api_key: str):
 
 # ── Normalización de países ────────────────────────────────────────────────────
 _PAIS_VARIANTES: dict[str, list[str]] = {
-    "argentina":  ["argentina", "argentino", "argentinas", "republica argentina", "republic of argentina"],
+    "argentina":  ["argentina", "argentino", "argentinas", "republica argentina", "republic of argentina", "mercosur"],
     "venezuela":  ["venezuela", "venezolano", "bolivariana", "republica bolivariana"],
     "colombia":   ["colombia", "colombiano", "colombiana", "republica de colombia"],
     "chile":      ["chile", "chileno", "chilena", "republica de chile"],
