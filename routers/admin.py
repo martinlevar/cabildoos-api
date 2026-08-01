@@ -440,3 +440,41 @@ async def review_verification(
         return {"ok": True, "status": new_status}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/errors")
+async def get_system_errors(
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+    limit: int = 100,
+    error_type: Optional[str] = None,
+    severity: Optional[str] = None,
+):
+    """
+    Errores críticos del sistema guardados en system_errors.
+    Filtrables por tipo (gemini, verification, auth) y severidad (warning, error, critical).
+    """
+    try:
+        q = supabase.table("system_errors").select("*").order("created_at", desc=True).limit(limit)
+        if error_type:
+            q = q.eq("error_type", error_type)
+        if severity:
+            q = q.eq("severity", severity)
+        res = q.execute()
+        return {"ok": True, "errors": res.data or [], "total": len(res.data or [])}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/errors/{error_id}")
+async def delete_system_error(
+    error_id: str,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Marcar un error como resuelto / eliminarlo del panel."""
+    try:
+        supabase.table("system_errors").delete().eq("id", error_id).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

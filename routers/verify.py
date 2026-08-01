@@ -14,6 +14,7 @@ from models.schemas import (
 from services.gemini import verificar_documento, extraer_cara_documento
 from services.storage import upload_documento, upload_selfie_liveness, upload_selfie_doc, upload_doc_face
 from services.supabase_client import get_supabase
+from services.error_log import log_gemini_error, log_verification_failure
 
 router = APIRouter(prefix="/api/verify", tags=["verificacion"])
 logger = logging.getLogger(__name__)
@@ -85,6 +86,29 @@ async def endpoint_verificar_documento(
     match = (extracted.nombre_coincide and extracted.numero_coincide
              and extracted.fecha_coincide and extracted.es_documento_real
              and pais_ok)
+
+    # ── Loguear errores de Gemini y fallos de verificación ───────────────────
+    client_ip = None  # request IP no está disponible aquí sin Request object
+    if extracted.observaciones and "Error:" in (extracted.observaciones or ""):
+        # Gemini falló completamente
+        log_gemini_error(supabase, "gemini-flash-latest", extracted.observaciones or "", ip=client_ip)
+    elif not match:
+        # Verificación falló — registrar qué campos fallaron
+        campos_fallidos = []
+        if not extracted.es_documento_real:     campos_fallidos.append("documento_no_real")
+        if not extracted.nombre_coincide:       campos_fallidos.append("nombre")
+        if not extracted.numero_coincide:       campos_fallidos.append("numero")
+        if not extracted.fecha_coincide:        campos_fallidos.append("fecha_nacimiento")
+        if not pais_ok:                         campos_fallidos.append("pais")
+        if campos_fallidos:
+            log_verification_failure(
+                supabase,
+                reason=", ".join(campos_fallidos),
+                tipo_doc=req.tipo_doc,
+                campos_fallidos=campos_fallidos,
+                confianza=extracted.confianza,
+            )
+
     try:
         supabase.table("verifications").upsert({
             "id":        req.verification_id,
