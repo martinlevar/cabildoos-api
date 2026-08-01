@@ -184,6 +184,39 @@ Para verificarte, ingresá a cabildoos.pages.dev y hacé clic en "Verificar iden
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: str,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Elimina permanentemente un usuario de Supabase Auth y sus datos relacionados.
+    """
+    project_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not service_key:
+        raise HTTPException(status_code=503, detail="SUPABASE_SERVICE_ROLE_KEY no configurada")
+
+    # Borrar de auth via Admin API (en cascada limpia auth.users)
+    import httpx as _httpx
+    resp = _httpx.delete(
+        f"{project_url}/auth/v1/admin/users/{user_id}",
+        headers={
+            "Authorization": f"Bearer {service_key}",
+            "apikey": service_key,
+        },
+        timeout=15,
+    )
+    if resp.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail=f"Error Supabase Auth: {resp.text}",
+        )
+
+    return {"ok": True}
+
+
 @router.get("/verifications", response_model=List[VerificationRecord])
 async def list_verifications(
     status: Optional[str] = None,
