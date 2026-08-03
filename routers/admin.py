@@ -111,7 +111,7 @@ async def list_users(
         raise HTTPException(status_code=500, detail=f"Error consultando auth users: {e}")
 
     # 2. Profiles (alias + seat_number)
-    profiles_res = supabase.table("profiles").select("id, alias, seat_number").execute()
+    profiles_res = supabase.table("profiles").select("id, alias, seat_number, status").execute()
     profiles = {p["id"]: p for p in (profiles_res.data or [])}
 
     # 3. Verifications (para saber estado)
@@ -135,8 +135,9 @@ async def list_users(
             "created_at":  u["created_at"],
             "confirmed":   u["confirmed"],
             "last_sign_in": u["last_sign_in"],
-            "seat_number": p.get("seat_number"),
-            "status":      status,
+            "seat_number":    p.get("seat_number"),
+            "status":         status,
+            "account_status": p.get("status", "active"),
         })
 
     result.sort(key=lambda x: x["created_at"], reverse=True)
