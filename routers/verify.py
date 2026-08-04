@@ -190,8 +190,8 @@ async def endpoint_submit_verificacion(
             "status":    "pendiente_revision",
             "doc_match": req.gemini_match,
         }
-        if req.contact_email:
-            row["contact_email"] = req.contact_email.strip().lower()
+        # contact_email NO se guarda — rompe el link email → butaca.
+        # El admin ve caras y asigna butacas sin saber quién es quién.
         supabase.table("verifications").upsert(row).execute()
         logger.info(f"Verificación guardada: {req.verification_id}")
     except Exception as e:
