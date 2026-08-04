@@ -110,17 +110,15 @@ async def list_users(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error consultando auth users: {e}")
 
-    # 2. Profiles (alias + seat_number + status)
-    # contact_email fue eliminado de verifications por privacidad — ya no se cruzan.
-    # El estado de verificación se determina solo desde profiles.
-    profiles_res = supabase.table("profiles").select("id, alias, seat_number, status").execute()
+    # 2. Profiles — seat_number eliminado (Option B), usamos verification_id
+    profiles_res = supabase.table("profiles").select("id, alias, verification_id, status").execute()
     profiles = {p["id"]: p for p in (profiles_res.data or [])}
 
     # 3. Combinar
     result = []
     for uid, u in auth_users.items():
         p = profiles.get(uid, {})
-        status = "verificado" if p.get("seat_number") else (p.get("status") or "sin_verificar")
+        status = "verificado" if p.get("verification_id") else (p.get("status") or "sin_verificar")
         result.append({
             "id":          uid,
             "email":       u["email"],
@@ -128,7 +126,7 @@ async def list_users(
             "created_at":  u["created_at"],
             "confirmed":   u["confirmed"],
             "last_sign_in": u["last_sign_in"],
-            "seat_number":    p.get("seat_number"),
+            "verified":       bool(p.get("verification_id")),
             "status":         status,
             "account_status": p.get("status", "active"),
         })
