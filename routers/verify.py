@@ -229,9 +229,22 @@ async def verificar_liveness(body: dict):
     """
     import asyncio
     from services.gemini import _call_gemini, _extract_json
+    from models.schemas import _validar_b64
 
-    image_b64 = body.get("image_b64", "")
+    image_b64   = body.get("image_b64", "")
     instruccion = body.get("instruccion", "")
+
+    # Validar imagen
+    try:
+        _validar_b64(image_b64, "Imagen de liveness")
+    except Exception:
+        raise HTTPException(status_code=422, detail="Imagen inválida")
+
+    # Validar instrucción: solo texto plano, max 200 chars
+    import re as _re
+    instruccion = str(instruccion).strip()[:200]
+    if not instruccion or not _re.match(r"^[\w\s\.,áéíóúÁÉÍÓÚñÑ\-]+$", instruccion):
+        raise HTTPException(status_code=422, detail="Instrucción inválida")
     if not image_b64 or not instruccion:
         return {"cumplió": True}
 
@@ -268,10 +281,15 @@ async def censurar_campos(body: dict):
     """
     import asyncio
     from services.gemini import _call_gemini, _extract_json
+    from models.schemas import _validar_b64
 
     image_b64 = body.get("image_b64", "")
     if not image_b64:
         return {"campos": []}
+    try:
+        _validar_b64(image_b64, "Imagen")
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     prompt = """This image shows a person holding an identity document (DNI, passport, ID card, or driver's license).
 
