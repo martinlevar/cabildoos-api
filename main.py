@@ -37,6 +37,11 @@ app = FastAPI(
 # ── CORS ───────────────────────────────────────────────────────────────────────
 origins = [
     os.environ.get("FRONTEND_ORIGIN", "https://cabildoos.pages.dev"),
+    "https://cabildoos.pages.dev",
+    "https://cabildodevenezuela.com",
+    "https://www.cabildodevenezuela.com",
+    "https://dev.cabildodevenezuela.com",
+    "https://admin.cabildodevenezuela.com",
     "http://localhost:3000",
     "http://localhost:8080",
     "http://127.0.0.1:5500",   # Live Server (VS Code)
