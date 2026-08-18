@@ -389,47 +389,167 @@ async def get_verification(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _enviar_email(to_email: str, subject: str, body: str):
+def _html_aprobacion(butaca: int) -> str:
+    """Template HTML profesional para el email de aprobación de butaca."""
+    site_url = "https://cabildodevenezuela.com"
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Tu butaca en CabildoOS</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0f1117;font-family:Arial,Helvetica,sans-serif;">
+
+  <!-- Preheader oculto (preview en inbox) -->
+  <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;">
+    Tu identidad fue verificada. Ocupas la butaca #{butaca} en el hemiciclo de CabildoOS.
+    &nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
+  </div>
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0f1117;">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+
+        <!-- Contenedor principal -->
+        <table width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
+
+          <!-- Header naranja -->
+          <tr>
+            <td style="background-color:#f76a1e;border-radius:12px 12px 0 0;padding:28px 32px;">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td>
+                    <p style="margin:0;color:#fff;font-size:13px;letter-spacing:2px;text-transform:uppercase;opacity:0.85;">CabildoOS</p>
+                    <h1 style="margin:6px 0 0;color:#fff;font-size:24px;font-weight:700;line-height:1.2;">
+                      Identidad verificada
+                    </h1>
+                  </td>
+                  <td align="right" style="font-size:40px;line-height:1;">◈</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Cuerpo -->
+          <tr>
+            <td style="background-color:#1a1d27;padding:36px 32px;border-left:1px solid #2a2d3a;border-right:1px solid #2a2d3a;">
+
+              <p style="margin:0 0 20px;color:#e0e0e0;font-size:16px;line-height:1.6;">
+                Tu identidad fue verificada por el equipo de CabildoOS.
+                Ya tenés tu lugar en el hemiciclo.
+              </p>
+
+              <!-- Tarjeta de butaca -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="background-color:#0f1117;border:1px solid #f76a1e;border-radius:10px;padding:24px;text-align:center;">
+                    <p style="margin:0 0 4px;color:#f76a1e;font-size:11px;letter-spacing:2px;text-transform:uppercase;">Tu butaca</p>
+                    <p style="margin:0;color:#fff;font-size:52px;font-weight:700;line-height:1;">#{butaca}</p>
+                    <p style="margin:8px 0 0;color:#888;font-size:13px;">Hemiciclo · CabildoOS</p>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:24px 0 28px;color:#aaa;font-size:14px;line-height:1.7;">
+                Este lugar es tuyo en el debate democrático. Ingresá al Cabildo para ver tu butaca
+                en el hemiciclo, seguir delegados, y participar en las propuestas.
+              </p>
+
+              <!-- CTA -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center">
+                    <a href="{site_url}"
+                       style="display:inline-block;background-color:#f76a1e;color:#fff;
+                              font-size:15px;font-weight:700;text-decoration:none;
+                              padding:14px 40px;border-radius:8px;letter-spacing:0.5px;">
+                      Ir al Cabildo →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#13161f;border-radius:0 0 12px 12px;padding:20px 32px;
+                       border:1px solid #2a2d3a;border-top:none;">
+              <p style="margin:0;color:#555;font-size:12px;line-height:1.6;text-align:center;">
+                Este mensaje fue enviado por el equipo de CabildoOS.<br>
+                Si no iniciaste este proceso, podés ignorar este email.<br>
+                <a href="{site_url}" style="color:#f76a1e;text-decoration:none;">cabildodevenezuela.com</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Contenedor principal -->
+
+      </td>
+    </tr>
+  </table>
+
+</body>
+</html>"""
+
+
+def _text_aprobacion(butaca: int) -> str:
+    return f"""Tu identidad fue verificada por el equipo de CabildoOS.
+
+BUTACA #{butaca}
+
+Este lugar es tuyo en el hemiciclo. Ingresá al Cabildo para ver tu butaca,
+seguir delegados y participar en las propuestas.
+
+https://cabildodevenezuela.com
+
+---
+CabildoOS · Si no iniciaste este proceso, ignorá este email."""
+
+
+def _enviar_email(to_email: str, subject: str, body_text: str, body_html: str | None = None):
     """
     Envía un email vía Resend (https://resend.com).
     Variable de entorno requerida: RESEND_API_KEY
-    Variable opcional: RESEND_FROM (default: verificacion@cabildoos.com)
+    Variable opcional: RESEND_FROM  (default: noreply@cabildodevenezuela.com)
+
+    IMPORTANTE para evitar spam:
+      - El dominio del FROM debe estar verificado en Resend con SPF + DKIM configurados.
+      - En Resend > Domains: agregar cabildodevenezuela.com y copiar los registros DNS.
     """
-    api_key  = os.environ.get("RESEND_API_KEY", "")
-    from_    = os.environ.get("RESEND_FROM", "CabildoOS Verificación <verificacion@cabildoos.com>")
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    from_   = os.environ.get("RESEND_FROM", "CabildoOS <noreply@cabildodevenezuela.com>")
 
     if not api_key:
         raise ValueError("RESEND_API_KEY no configurada")
 
-    html_body = f"""
-    <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1a1a1a">
-      <div style="background:#f76a1e;padding:24px;border-radius:10px 10px 0 0">
-        <h2 style="margin:0;color:#fff;font-size:20px">◈ CabildoOS — Verificación de Identidad</h2>
-      </div>
-      <div style="background:#f9f9f9;padding:28px;border-radius:0 0 10px 10px;border:1px solid #eee;border-top:none">
-        <p style="margin:0 0 16px;font-size:15px">{body.replace(chr(10), '<br>')}</p>
-        <hr style="border:none;border-top:1px solid #eee;margin:20px 0">
-        <p style="margin:0;font-size:12px;color:#888">
-          Este mensaje fue enviado por el equipo de verificación de CabildoOS.<br>
-          No respondas a este email — ingresá a
-          <a href="https://cabildoos.pages.dev" style="color:#f76a1e">cabildoos.pages.dev</a>
-          para reenviar tu solicitud.
-        </p>
-      </div>
-    </div>
-    """
+    # Si no se pasa HTML, generar uno básico desde el texto plano
+    if body_html is None:
+        body_html = f"""<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;color:#222;max-width:560px;margin:0 auto;padding:24px">
+<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">{body_text}</pre>
+</body></html>"""
+
+    payload = {
+        "from":    from_,
+        "to":      [to_email],
+        "subject": subject,
+        "html":    body_html,
+        "text":    body_text,
+        # Headers que mejoran deliverability y evitan clasificación como spam
+        "headers": {
+            "X-Entity-Ref-ID": f"cabildoos-{to_email}",
+        },
+    }
 
     with httpx.Client(timeout=15) as client:
         resp = client.post(
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "from":    from_,
-                "to":      [to_email],
-                "subject": subject,
-                "html":    html_body,
-                "text":    body,
-            },
+            json=payload,
         )
     if resp.status_code not in (200, 201):
         raise RuntimeError(f"Resend error {resp.status_code}: {resp.text}")
@@ -638,21 +758,13 @@ async def approve_verification(
     # 4. Enviar email de aprobación
     email_sent = False
     if user_email:
-        cuerpo = f"""¡Tu identidad fue verificada! 🎉
-
-Te asignamos la butaca #{butaca} en el hemiciclo de CabildoOS.
-
-Ingresá a cabildoos.pages.dev para ver tu lugar en el hemiciclo y empezar a participar en el debate democrático.
-
-Tu número de butaca: #{butaca}
-
-Este lugar es tuyo. Bienvenido al Cabildo."""
         try:
             await asyncio.to_thread(
                 _enviar_email,
                 user_email,
-                f"CabildoOS — ¡Tu butaca #{butaca} está lista!",
-                cuerpo,
+                f"Tu butaca #{butaca} en CabildoOS ya está activa",
+                _text_aprobacion(butaca),
+                _html_aprobacion(butaca),
             )
             email_sent = True
             logger.info(f"Email de aprobación enviado a {user_email} — butaca #{butaca}")
