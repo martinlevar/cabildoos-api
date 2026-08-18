@@ -97,12 +97,17 @@ async def list_users(
             data = resp.json()
             batch = data.get("users", [])
             for u in batch:
+                app_meta = u.get("app_metadata") or {}
+                # Excluir usuarios Master del listado de usuarios comunes
+                if app_meta.get("is_master"):
+                    continue
                 auth_users[u["id"]] = {
                     "id": u["id"],
                     "email": u.get("email", ""),
                     "created_at": u.get("created_at", ""),
                     "confirmed": bool(u.get("email_confirmed_at")),
                     "last_sign_in": u.get("last_sign_in_at"),
+                    "is_master": False,
                 }
             if len(batch) < 1000:
                 break
