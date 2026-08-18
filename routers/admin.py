@@ -188,14 +188,39 @@ async def delete_user(
     supabase: Client = Depends(get_supabase),
 ):
     """
-    Elimina permanentemente un usuario de Supabase Auth y sus datos relacionados.
+    Elimina permanentemente un usuario de Supabase Auth y libera su butaca.
+    Orden: purge_seat_history → eliminar profile → eliminar auth user
     """
     project_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
     if not service_key:
         raise HTTPException(status_code=503, detail="SUPABASE_SERVICE_ROLE_KEY no configurada")
 
-    # Borrar de auth via Admin API (en cascada limpia auth.users)
+    # 1. Obtener butaca del usuario antes de borrar nada
+    try:
+        profile_res = supabase.table("profiles") \
+            .select("butaca_numero") \
+            .eq("id", user_id) \
+            .maybe_single() \
+            .execute()
+        butaca = profile_res.data.get("butaca_numero") if profile_res.data else None
+    except Exception:
+        butaca = None
+
+    # 2. Si tenía butaca: purgar todo el historial de ese asiento
+    if butaca:
+        try:
+            supabase.rpc("purge_seat_history", {"p_seat": butaca}).execute()
+        except Exception as e:
+            logger.warning(f"purge_seat_history falló para butaca {butaca}: {e}")
+
+    # 3. Borrar el perfil explícitamente (no hay CASCADE en profiles → auth.users)
+    try:
+        supabase.table("profiles").delete().eq("id", user_id).execute()
+    except Exception as e:
+        logger.warning(f"Error borrando profile {user_id}: {e}")
+
+    # 4. Borrar de auth via Admin API
     import httpx as _httpx
     resp = _httpx.delete(
         f"{project_url}/auth/v1/admin/users/{user_id}",
@@ -211,7 +236,7 @@ async def delete_user(
             detail=f"Error Supabase Auth: {resp.text}",
         )
 
-    return {"ok": True}
+    return {"ok": True, "butaca_liberada": butaca}
 
 
 @router.get("/verifications", response_model=List[VerificationRecord])
