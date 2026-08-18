@@ -214,13 +214,19 @@ async def delete_user(
         except Exception as e:
             logger.warning(f"purge_seat_history falló para butaca {butaca}: {e}")
 
-    # 3. Borrar el perfil explícitamente (no hay CASCADE en profiles → auth.users)
+    # 3. Limpiar verification_requests del usuario
+    try:
+        supabase.table("verification_requests").delete().eq("user_id", user_id).execute()
+    except Exception as e:
+        logger.warning(f"Error borrando verification_requests de {user_id}: {e}")
+
+    # 4. Borrar el perfil explícitamente (no hay CASCADE en profiles → auth.users)
     try:
         supabase.table("profiles").delete().eq("id", user_id).execute()
     except Exception as e:
         logger.warning(f"Error borrando profile {user_id}: {e}")
 
-    # 4. Borrar de auth via Admin API
+    # 5. Borrar de auth via Admin API
     import httpx as _httpx
     resp = _httpx.delete(
         f"{project_url}/auth/v1/admin/users/{user_id}",
@@ -237,6 +243,111 @@ async def delete_user(
         )
 
     return {"ok": True, "butaca_liberada": butaca}
+
+
+@router.post("/users/{user_id}/block-doc")
+async def block_doc_and_delete_user(
+    user_id: str,
+    body: dict,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Elimina al usuario Y bloquea permanentemente su doc_hash.
+    El DNI bloqueado no podrá usarse para crear ninguna cuenta nueva.
+    Body: { "admin_email": "..." (opcional) }
+    """
+    project_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not service_key:
+        raise HTTPException(status_code=503, detail="SUPABASE_SERVICE_ROLE_KEY no configurada")
+
+    admin_email = (body.get("admin_email") or "").strip()
+
+    # 1. Obtener doc_hash del usuario desde verifications
+    doc_hash = None
+    try:
+        # Buscar via verification_id en profiles
+        profile_res = supabase.table("profiles") \
+            .select("butaca_numero, verification_id") \
+            .eq("id", user_id) \
+            .maybe_single() \
+            .execute()
+        butaca = profile_res.data.get("butaca_numero") if profile_res.data else None
+        verification_id = profile_res.data.get("verification_id") if profile_res.data else None
+
+        if verification_id:
+            ver_res = supabase.table("verifications") \
+                .select("doc_hash") \
+                .eq("id", verification_id) \
+                .maybe_single() \
+                .execute()
+            doc_hash = ver_res.data.get("doc_hash") if ver_res.data else None
+
+        if not doc_hash and butaca:
+            # Fallback: buscar por butaca_numero
+            ver_res = supabase.table("verifications") \
+                .select("doc_hash") \
+                .eq("butaca_numero", butaca) \
+                .maybe_single() \
+                .execute()
+            doc_hash = ver_res.data.get("doc_hash") if ver_res.data else None
+    except Exception as e:
+        logger.warning(f"Error obteniendo doc_hash de {user_id}: {e}")
+        butaca = None
+
+    # 2. Bloquear el doc_hash si existe
+    if doc_hash:
+        try:
+            supabase.table("blocked_doc_hashes").upsert({
+                "hash":       doc_hash,
+                "blocked_by": admin_email or "admin",
+                "reason":     "Bloqueado al eliminar usuario",
+            }).execute()
+            logger.info(f"doc_hash bloqueado para usuario {user_id}")
+        except Exception as e:
+            logger.warning(f"Error bloqueando doc_hash: {e}")
+
+    # 3. Purgar historial de butaca (incluye verifications con doc_hash)
+    if butaca:
+        try:
+            supabase.rpc("purge_seat_history", {"p_seat": butaca}).execute()
+        except Exception as e:
+            logger.warning(f"purge_seat_history falló para butaca {butaca}: {e}")
+
+    # 4. Limpiar verification_requests
+    try:
+        supabase.table("verification_requests").delete().eq("user_id", user_id).execute()
+    except Exception as e:
+        logger.warning(f"Error borrando verification_requests de {user_id}: {e}")
+
+    # 5. Borrar perfil
+    try:
+        supabase.table("profiles").delete().eq("id", user_id).execute()
+    except Exception as e:
+        logger.warning(f"Error borrando profile {user_id}: {e}")
+
+    # 6. Borrar de auth via Admin API
+    import httpx as _httpx
+    resp = _httpx.delete(
+        f"{project_url}/auth/v1/admin/users/{user_id}",
+        headers={
+            "Authorization": f"Bearer {service_key}",
+            "apikey": service_key,
+        },
+        timeout=15,
+    )
+    if resp.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=resp.status_code,
+            detail=f"Error Supabase Auth: {resp.text}",
+        )
+
+    return {
+        "ok": True,
+        "butaca_liberada": butaca,
+        "doc_hash_bloqueado": bool(doc_hash),
+    }
 
 
 @router.get("/verifications", response_model=List[VerificationRecord])
