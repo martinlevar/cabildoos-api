@@ -555,6 +555,33 @@ def _enviar_email(to_email: str, subject: str, body_text: str, body_html: str | 
         raise RuntimeError(f"Resend error {resp.status_code}: {resp.text}")
 
 
+@router.get("/users/{uid}/email")
+async def get_user_email(
+    uid: str,
+    token: str = Depends(_verificar_admin),
+):
+    """
+    Obtiene el email de un usuario de auth.users por su UUID.
+    Usado por el admin cuando contact_email no está en verifications.
+    """
+    import httpx, os
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    service_key  = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{supabase_url}/auth/v1/admin/users/{uid}",
+                headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+            )
+        if resp.status_code == 200:
+            return {"email": resp.json().get("email")}
+        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/verifications/{vid}/contact")
 async def contact_user(
     vid: str,
@@ -575,9 +602,10 @@ async def contact_user(
         raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
 
     # 1. Obtener todos los datos de la verificación antes de borrar
+    import httpx as _httpx, os as _os
     try:
         res = supabase.table("verifications") \
-            .select("id, contact_email, doc_face_url, selfie_doc_url, doc_match, doc_hash, status") \
+            .select("id, contact_email, user_id, doc_face_url, selfie_doc_url, doc_match, doc_hash, status") \
             .eq("id", vid) \
             .single() \
             .execute()
@@ -585,8 +613,24 @@ async def contact_user(
             raise HTTPException(status_code=404, detail="Verificación no encontrada")
         v = res.data
         contact_email = v.get("contact_email")
+
+        # Fallback: buscar email en auth.users via user_id
+        if not contact_email and v.get("user_id"):
+            try:
+                supabase_url = _os.environ.get("SUPABASE_URL", "")
+                service_key  = _os.environ.get("SUPABASE_SERVICE_KEY", "")
+                auth_resp = _httpx.get(
+                    f"{supabase_url}/auth/v1/admin/users/{v['user_id']}",
+                    headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+                    timeout=10,
+                )
+                if auth_resp.status_code == 200:
+                    contact_email = auth_resp.json().get("email")
+            except Exception:
+                pass
+
         if not contact_email:
-            raise HTTPException(status_code=400, detail="El usuario no proporcionó email de contacto")
+            raise HTTPException(status_code=400, detail="No se encontró email para este usuario")
     except HTTPException:
         raise
     except Exception as e:
@@ -611,13 +655,54 @@ async def contact_user(
         logger.error(f"Error creando contact_request: {e}")
         raise HTTPException(status_code=500, detail=f"Error guardando registro: {e}")
 
-    # 3. Enviar email
+    # 3. Enviar email con template HTML
+    site_url = "https://cabildodevenezuela.com"
+    html_contacto = f"""<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background-color:#0f1117;font-family:Arial,Helvetica,sans-serif;">
+<div style="display:none;max-height:0;overflow:hidden;">El equipo de CabildoOS necesita más información para completar tu verificación.&nbsp;&zwnj;&nbsp;&zwnj;</div>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0f1117;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
+      <tr><td style="background-color:#7c3aed;border-radius:12px 12px 0 0;padding:28px 32px;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td><p style="margin:0;color:#fff;font-size:13px;letter-spacing:2px;text-transform:uppercase;opacity:.85;">CabildoOS</p>
+              <h1 style="margin:6px 0 0;color:#fff;font-size:22px;font-weight:700;">Necesitamos más información</h1></td>
+          <td align="right" style="font-size:36px;line-height:1;">📧</td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="background-color:#1a1d27;padding:32px;border-left:1px solid #2a2d3a;border-right:1px solid #2a2d3a;">
+        <p style="margin:0 0 16px;color:#aaa;font-size:14px;line-height:1.6;">El equipo de verificación revisó tu solicitud y tiene una consulta:</p>
+        <div style="background:#0f1117;border-left:3px solid #a855f7;border-radius:4px;padding:16px 20px;margin:0 0 24px;">
+          <p style="margin:0;color:#e0e0e0;font-size:15px;line-height:1.7;white-space:pre-wrap;">{mensaje}</p>
+        </div>
+        <p style="margin:0 0 24px;color:#aaa;font-size:14px;line-height:1.6;">
+          Podés volver a iniciar el proceso de verificación con la información solicitada.
+          Tu documento previo fue liberado — podés usarlo nuevamente.
+        </p>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center">
+          <a href="{site_url}" style="display:inline-block;background-color:#7c3aed;color:#fff;font-size:15px;font-weight:700;text-decoration:none;padding:14px 40px;border-radius:8px;">
+            Ir a CabildoOS →
+          </a>
+        </td></tr></table>
+      </td></tr>
+      <tr><td style="background-color:#13161f;border-radius:0 0 12px 12px;padding:20px 32px;border:1px solid #2a2d3a;border-top:none;">
+        <p style="margin:0;color:#555;font-size:12px;line-height:1.6;text-align:center;">
+          Este mensaje fue enviado por el equipo de verificación de CabildoOS.<br>
+          <a href="{site_url}" style="color:#a855f7;text-decoration:none;">cabildodevenezuela.com</a>
+        </p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>"""
     try:
         await asyncio.to_thread(
             _enviar_email,
             contact_email,
-            "CabildoOS — Tu solicitud de verificación necesita más información",
+            "Tu verificación en CabildoOS necesita un ajuste",
             mensaje,
+            html_contacto,
         )
         logger.info(f"Email enviado a {contact_email}")
     except Exception as e:
