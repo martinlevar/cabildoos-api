@@ -98,8 +98,8 @@ async def list_users(
             batch = data.get("users", [])
             for u in batch:
                 app_meta = u.get("app_metadata") or {}
-                # Excluir Masters y Observers del listado de usuarios comunes
-                if app_meta.get("is_master") or app_meta.get("role") in ("observer", "admin", "moderator", "validator", "revoked"):
+                # Excluir solo Masters y Observers (que no son ciudadanos del cabildo)
+                if app_meta.get("is_master") or app_meta.get("role") == "observer":
                     continue
                 auth_users[u["id"]] = {
                     "id": u["id"],
