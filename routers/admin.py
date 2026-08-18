@@ -581,6 +581,87 @@ async def actualizar_status_cr(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/verifications/{vid}/approve")
+async def approve_verification(
+    vid: str,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Aprueba una verificación:
+    1. Llama assign_butaca() para asignar el próximo número de butaca
+    2. Envía email de confirmación al usuario con su butaca asignada
+    Retorna: { butaca, email_sent, email }
+    """
+    import asyncio
+    project_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+
+    # 1. Llamar assign_butaca via RPC
+    try:
+        result = supabase.rpc("assign_butaca", {"p_verification_id": vid}).execute()
+        butaca = result.data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error asignando butaca: {e}")
+
+    if not butaca:
+        raise HTTPException(status_code=500, detail="assign_butaca no retornó número de butaca")
+
+    # 2. Borrar imágenes de verificación (privacidad — ya cumplieron su función)
+    try:
+        supabase.storage.from_("verifications").remove([
+            f"{vid}/selfie_documento.jpg",
+            f"{vid}/documento.jpg",
+        ])
+    except Exception as e:
+        logger.warning(f"No se pudieron borrar imágenes de {vid}: {e}")
+
+    # 3. Obtener email del usuario para notificar
+    user_email = None
+    try:
+        ver_res = supabase.table("verifications").select("user_id, contact_email").eq("id", vid).maybe_single().execute()
+        if ver_res.data:
+            user_email = ver_res.data.get("contact_email")
+            user_id    = ver_res.data.get("user_id")
+            # Si no hay contact_email, buscar en auth.users via service role
+            if not user_email and user_id and service_key:
+                auth_resp = httpx.get(
+                    f"{project_url}/auth/v1/admin/users/{user_id}",
+                    headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+                    timeout=10,
+                )
+                if auth_resp.status_code == 200:
+                    user_email = auth_resp.json().get("email")
+    except Exception as e:
+        logger.warning(f"No se pudo obtener email para verificación {vid}: {e}")
+
+    # 4. Enviar email de aprobación
+    email_sent = False
+    if user_email:
+        cuerpo = f"""¡Tu identidad fue verificada! 🎉
+
+Te asignamos la butaca #{butaca} en el hemiciclo de CabildoOS.
+
+Ingresá a cabildoos.pages.dev para ver tu lugar en el hemiciclo y empezar a participar en el debate democrático.
+
+Tu número de butaca: #{butaca}
+
+Este lugar es tuyo. Bienvenido al Cabildo."""
+        try:
+            await asyncio.to_thread(
+                _enviar_email,
+                user_email,
+                f"CabildoOS — ¡Tu butaca #{butaca} está lista!",
+                cuerpo,
+            )
+            email_sent = True
+            logger.info(f"Email de aprobación enviado a {user_email} — butaca #{butaca}")
+        except Exception as e:
+            logger.warning(f"No se pudo enviar email de aprobación: {e}")
+
+    return {"ok": True, "butaca": butaca, "email_sent": email_sent, "email": user_email}
+
+
 @router.patch("/verifications/{vid}/review")
 async def review_verification(
     vid: str,
