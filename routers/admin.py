@@ -555,27 +555,44 @@ def _enviar_email(to_email: str, subject: str, body_text: str, body_html: str | 
         raise RuntimeError(f"Resend error {resp.status_code}: {resp.text}")
 
 
-@router.get("/users/{uid}/email")
-async def get_user_email(
-    uid: str,
+@router.get("/verifications/{vid}/contact-email")
+async def get_verification_contact_email(
+    vid: str,
     token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
 ):
     """
-    Obtiene el email de un usuario de auth.users por su UUID.
-    Usado por el admin cuando contact_email no está en verifications.
+    Obtiene el email de contacto de una verificación pendiente, bajo demanda.
+    Resuelve user_id → auth.users en memoria — NO almacena la conexión en ningún lado.
     """
     import httpx, os
+    try:
+        res = supabase.table("verifications") \
+            .select("user_id") \
+            .eq("id", vid) \
+            .single() \
+            .execute()
+        if not res.data or not res.data.get("user_id"):
+            raise HTTPException(status_code=404, detail="No hay usuario vinculado a esta verificación")
+        user_id = res.data["user_id"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     supabase_url = os.environ.get("SUPABASE_URL", "")
     service_key  = os.environ.get("SUPABASE_SERVICE_KEY", "")
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                f"{supabase_url}/auth/v1/admin/users/{uid}",
+            auth_resp = await client.get(
+                f"{supabase_url}/auth/v1/admin/users/{user_id}",
                 headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
             )
-        if resp.status_code == 200:
-            return {"email": resp.json().get("email")}
-        raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        if auth_resp.status_code == 200:
+            email = auth_resp.json().get("email")
+            if email:
+                return {"email": email}
+        raise HTTPException(status_code=404, detail="No se encontró email para este usuario")
     except HTTPException:
         raise
     except Exception as e:
@@ -591,69 +608,52 @@ async def contact_user(
 ):
     """
     Pide más info al usuario:
-    1. Guarda todo en contact_requests (audit trail)
+    1. Resuelve el email en memoria (user_id → auth.users) — sin almacenar la conexión
     2. Envía el email
-    3. Elimina el registro de verifications (libera el doc_hash para que pueda reverificarse)
+    3. Elimina el registro de verifications (libera el doc_hash para reverificación)
+
+    PRIVACIDAD: no queda ningún rastro que vincule butaca/cara con email.
     Body: { "mensaje": "..." }
     """
-    import asyncio
+    import asyncio, httpx as _httpx, os as _os
     mensaje = (body.get("mensaje") or "").strip()
     if not mensaje:
         raise HTTPException(status_code=400, detail="El mensaje no puede estar vacío")
 
-    # 1. Obtener todos los datos de la verificación antes de borrar
-    import httpx as _httpx, os as _os
+    # 1. Obtener solo user_id — sin cargar fotos ni doc_hash
     try:
         res = supabase.table("verifications") \
-            .select("id, contact_email, user_id, doc_face_url, selfie_doc_url, doc_match, doc_hash, status") \
+            .select("user_id") \
             .eq("id", vid) \
             .single() \
             .execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Verificación no encontrada")
-        v = res.data
-        contact_email = v.get("contact_email")
-
-        # Fallback: buscar email en auth.users via user_id
-        if not contact_email and v.get("user_id"):
-            try:
-                supabase_url = _os.environ.get("SUPABASE_URL", "")
-                service_key  = _os.environ.get("SUPABASE_SERVICE_KEY", "")
-                auth_resp = _httpx.get(
-                    f"{supabase_url}/auth/v1/admin/users/{v['user_id']}",
-                    headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
-                    timeout=10,
-                )
-                if auth_resp.status_code == 200:
-                    contact_email = auth_resp.json().get("email")
-            except Exception:
-                pass
-
-        if not contact_email:
-            raise HTTPException(status_code=400, detail="No se encontró email para este usuario")
+        user_id = res.data.get("user_id")
+        if not user_id:
+            raise HTTPException(status_code=400, detail="Esta verificación no tiene usuario vinculado")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    # 2. Guardar en contact_requests (audit trail permanente)
+    # 2. Resolver email en memoria via auth.users — nunca se persiste esta conexión
+    supabase_url = _os.environ.get("SUPABASE_URL", "")
+    service_key  = _os.environ.get("SUPABASE_SERVICE_KEY", "")
+    contact_email: str | None = None
     try:
-        cr = supabase.table("contact_requests").insert({
-            "verification_id": vid,
-            "contact_email":   contact_email,
-            "doc_face_url":    v.get("doc_face_url"),
-            "selfie_doc_url":  v.get("selfie_doc_url"),
-            "doc_match":       v.get("doc_match"),
-            "doc_hash":        v.get("doc_hash"),
-            "mensaje_inicial": mensaje,
-            "status":          "esperando",
-            "notas":           [],
-        }).execute()
-        cr_id = cr.data[0]["id"] if cr.data else None
-        logger.info(f"contact_request creado: {cr_id}")
-    except Exception as e:
-        logger.error(f"Error creando contact_request: {e}")
-        raise HTTPException(status_code=500, detail=f"Error guardando registro: {e}")
+        async with _httpx.AsyncClient(timeout=10) as client:
+            auth_resp = await client.get(
+                f"{supabase_url}/auth/v1/admin/users/{user_id}",
+                headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+            )
+        if auth_resp.status_code == 200:
+            contact_email = auth_resp.json().get("email")
+    except Exception:
+        pass
+
+    if not contact_email:
+        raise HTTPException(status_code=400, detail="No se encontró email para este usuario")
 
     # 3. Enviar email con template HTML
     site_url = "https://cabildodevenezuela.com"
@@ -704,20 +704,20 @@ async def contact_user(
             mensaje,
             html_contacto,
         )
-        logger.info(f"Email enviado a {contact_email}")
+        logger.info("Email de contacto enviado — verificación será eliminada")
     except Exception as e:
-        # Si falla el email, no borramos el registro
         logger.error(f"Error enviando email: {e}")
         raise HTTPException(status_code=500, detail=f"Error al enviar email: {e}")
 
     # 4. Eliminar de verifications (libera el doc_hash para reverificación)
+    #    PRIVACIDAD: al borrar esto desaparece la última conexión entre cara y usuario.
     try:
         supabase.table("verifications").delete().eq("id", vid).execute()
-        logger.info(f"Verificación {vid} eliminada — doc_hash liberado")
+        logger.info(f"Verificación {vid} eliminada — sin rastro")
     except Exception as e:
         logger.warning(f"Email enviado pero error al eliminar verificación: {e}")
 
-    return {"ok": True, "enviado_a": contact_email, "contact_request_id": cr_id}
+    return {"ok": True}
 
 
 @router.get("/contact-requests")
@@ -821,22 +821,19 @@ async def approve_verification(
     except Exception as e:
         logger.warning(f"No se pudieron borrar imágenes de {vid}: {e}")
 
-    # 3. Obtener email del usuario para notificar
+    # 3. Obtener email del usuario para notificar (siempre via user_id → auth.users)
     user_email = None
     try:
-        ver_res = supabase.table("verifications").select("user_id, contact_email").eq("id", vid).maybe_single().execute()
-        if ver_res.data:
-            user_email = ver_res.data.get("contact_email")
-            user_id    = ver_res.data.get("user_id")
-            # Si no hay contact_email, buscar en auth.users via service role
-            if not user_email and user_id and service_key:
-                auth_resp = httpx.get(
-                    f"{project_url}/auth/v1/admin/users/{user_id}",
-                    headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
-                    timeout=10,
-                )
-                if auth_resp.status_code == 200:
-                    user_email = auth_resp.json().get("email")
+        ver_res = supabase.table("verifications").select("user_id").eq("id", vid).maybe_single().execute()
+        user_id = ver_res.data.get("user_id") if ver_res.data else None
+        if user_id and service_key:
+            auth_resp = httpx.get(
+                f"{project_url}/auth/v1/admin/users/{user_id}",
+                headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+                timeout=10,
+            )
+            if auth_resp.status_code == 200:
+                user_email = auth_resp.json().get("email")
     except Exception as e:
         logger.warning(f"No se pudo obtener email para verificación {vid}: {e}")
 
