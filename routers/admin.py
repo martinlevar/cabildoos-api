@@ -196,17 +196,19 @@ async def delete_user(
     if not service_key:
         raise HTTPException(status_code=503, detail="SUPABASE_SERVICE_ROLE_KEY no configurada")
 
-    # Nota: butaca_numero ya no está en profiles (migrado a seat_identities con HMAC)
-    # La fila de seat_identities queda huérfana — sin user_id nadie puede calcular
-    # el seat_token, así que es inaccesible e inofensiva.
-
-    # 3. Limpiar verification_requests del usuario
+    # Limpiar verification_requests
     try:
         supabase.table("verification_requests").delete().eq("user_id", user_id).execute()
     except Exception as e:
         logger.warning(f"Error borrando verification_requests de {user_id}: {e}")
 
-    # 4. Borrar el perfil explícitamente (no hay CASCADE en profiles → auth.users)
+    # Borrar verifications — libera el doc_hash para que el documento pueda reusarse
+    try:
+        supabase.table("verifications").delete().eq("user_id", user_id).execute()
+    except Exception as e:
+        logger.warning(f"Error borrando verifications de {user_id}: {e}")
+
+    # Borrar el perfil
     try:
         supabase.table("profiles").delete().eq("id", user_id).execute()
     except Exception as e:
@@ -287,6 +289,12 @@ async def block_doc_and_delete_user(
         supabase.table("verification_requests").delete().eq("user_id", user_id).execute()
     except Exception as e:
         logger.warning(f"Error borrando verification_requests de {user_id}: {e}")
+
+    # 4. Borrar verifications — el doc_hash ya fue copiado a blocked_doc_hashes arriba
+    try:
+        supabase.table("verifications").delete().eq("user_id", user_id).execute()
+    except Exception as e:
+        logger.warning(f"Error borrando verifications de {user_id}: {e}")
 
     # 5. Borrar perfil
     try:
