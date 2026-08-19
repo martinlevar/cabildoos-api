@@ -115,8 +115,8 @@ async def list_users(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error consultando auth users: {e}")
 
-    # 2. Profiles — seat_number eliminado (Option B), usamos verification_id
-    profiles_res = supabase.table("profiles").select("id, alias, verification_id, status").execute()
+    # 2. Profiles — alias y butaca_numero fueron migrados a seat_identities (privacidad)
+    profiles_res = supabase.table("profiles").select("id, verification_id, status").execute()
     profiles = {p["id"]: p for p in (profiles_res.data or [])}
 
     # 3. Combinar
@@ -127,7 +127,7 @@ async def list_users(
         result.append({
             "id":          uid,
             "email":       u["email"],
-            "alias":       p.get("alias", u["email"].split("@")[0]),
+            "alias":       u["email"].split("@")[0],
             "created_at":  u["created_at"],
             "confirmed":   u["confirmed"],
             "last_sign_in": u["last_sign_in"],
@@ -196,23 +196,9 @@ async def delete_user(
     if not service_key:
         raise HTTPException(status_code=503, detail="SUPABASE_SERVICE_ROLE_KEY no configurada")
 
-    # 1. Obtener butaca del usuario antes de borrar nada
-    try:
-        profile_res = supabase.table("profiles") \
-            .select("butaca_numero") \
-            .eq("id", user_id) \
-            .maybe_single() \
-            .execute()
-        butaca = profile_res.data.get("butaca_numero") if profile_res.data else None
-    except Exception:
-        butaca = None
-
-    # 2. Si tenía butaca: purgar todo el historial de ese asiento
-    if butaca:
-        try:
-            supabase.rpc("purge_seat_history", {"p_seat": butaca}).execute()
-        except Exception as e:
-            logger.warning(f"purge_seat_history falló para butaca {butaca}: {e}")
+    # Nota: butaca_numero ya no está en profiles (migrado a seat_identities con HMAC)
+    # La fila de seat_identities queda huérfana — sin user_id nadie puede calcular
+    # el seat_token, así que es inaccesible e inofensiva.
 
     # 3. Limpiar verification_requests del usuario
     try:
@@ -242,7 +228,7 @@ async def delete_user(
             detail=f"Error Supabase Auth: {resp.text}",
         )
 
-    return {"ok": True, "butaca_liberada": butaca}
+    return {"ok": True}
 
 
 @router.post("/users/{user_id}/block-doc")
@@ -264,16 +250,14 @@ async def block_doc_and_delete_user(
 
     admin_email = (body.get("admin_email") or "").strip()
 
-    # 1. Obtener doc_hash del usuario desde verifications
+    # 1. Obtener doc_hash via verification_id en profiles
     doc_hash = None
     try:
-        # Buscar via verification_id en profiles
         profile_res = supabase.table("profiles") \
-            .select("butaca_numero, verification_id") \
+            .select("verification_id") \
             .eq("id", user_id) \
             .maybe_single() \
             .execute()
-        butaca = profile_res.data.get("butaca_numero") if profile_res.data else None
         verification_id = profile_res.data.get("verification_id") if profile_res.data else None
 
         if verification_id:
@@ -283,18 +267,8 @@ async def block_doc_and_delete_user(
                 .maybe_single() \
                 .execute()
             doc_hash = ver_res.data.get("doc_hash") if ver_res.data else None
-
-        if not doc_hash and butaca:
-            # Fallback: buscar por butaca_numero
-            ver_res = supabase.table("verifications") \
-                .select("doc_hash") \
-                .eq("butaca_numero", butaca) \
-                .maybe_single() \
-                .execute()
-            doc_hash = ver_res.data.get("doc_hash") if ver_res.data else None
     except Exception as e:
         logger.warning(f"Error obteniendo doc_hash de {user_id}: {e}")
-        butaca = None
 
     # 2. Bloquear el doc_hash si existe
     if doc_hash:
@@ -308,14 +282,7 @@ async def block_doc_and_delete_user(
         except Exception as e:
             logger.warning(f"Error bloqueando doc_hash: {e}")
 
-    # 3. Purgar historial de butaca (incluye verifications con doc_hash)
-    if butaca:
-        try:
-            supabase.rpc("purge_seat_history", {"p_seat": butaca}).execute()
-        except Exception as e:
-            logger.warning(f"purge_seat_history falló para butaca {butaca}: {e}")
-
-    # 4. Limpiar verification_requests
+    # 3. Limpiar verification_requests
     try:
         supabase.table("verification_requests").delete().eq("user_id", user_id).execute()
     except Exception as e:
@@ -345,7 +312,6 @@ async def block_doc_and_delete_user(
 
     return {
         "ok": True,
-        "butaca_liberada": butaca,
         "doc_hash_bloqueado": bool(doc_hash),
     }
 
