@@ -196,39 +196,13 @@ async def delete_user(
     if not service_key:
         raise HTTPException(status_code=503, detail="SUPABASE_SERVICE_ROLE_KEY no configurada")
 
-    # Limpiar verification_requests
+    # Delegar toda la limpieza al RPC admin_delete_user:
+    # borra seat_identities (libera butaca), verifications (libera DNI),
+    # verification_requests, profiles y auth.users en un solo paso atómico.
     try:
-        supabase.table("verification_requests").delete().eq("user_id", user_id).execute()
+        supabase.rpc("admin_delete_user", {"p_user_id": user_id}).execute()
     except Exception as e:
-        logger.warning(f"Error borrando verification_requests de {user_id}: {e}")
-
-    # Borrar verifications — libera el doc_hash para que el documento pueda reusarse
-    try:
-        supabase.table("verifications").delete().eq("user_id", user_id).execute()
-    except Exception as e:
-        logger.warning(f"Error borrando verifications de {user_id}: {e}")
-
-    # Borrar el perfil
-    try:
-        supabase.table("profiles").delete().eq("id", user_id).execute()
-    except Exception as e:
-        logger.warning(f"Error borrando profile {user_id}: {e}")
-
-    # 5. Borrar de auth via Admin API
-    import httpx as _httpx
-    resp = _httpx.delete(
-        f"{project_url}/auth/v1/admin/users/{user_id}",
-        headers={
-            "Authorization": f"Bearer {service_key}",
-            "apikey": service_key,
-        },
-        timeout=15,
-    )
-    if resp.status_code not in (200, 204):
-        raise HTTPException(
-            status_code=resp.status_code,
-            detail=f"Error Supabase Auth: {resp.text}",
-        )
+        raise HTTPException(status_code=500, detail=f"Error eliminando usuario: {e}")
 
     return {"ok": True}
 
@@ -284,39 +258,13 @@ async def block_doc_and_delete_user(
         except Exception as e:
             logger.warning(f"Error bloqueando doc_hash: {e}")
 
-    # 3. Limpiar verification_requests
+    # Delegar la eliminación completa al RPC (libera butaca + DNI + historial)
+    # El doc_hash ya quedó copiado a blocked_doc_hashes arriba — queda bloqueado
+    # incluso si el RPC borra la verificación original.
     try:
-        supabase.table("verification_requests").delete().eq("user_id", user_id).execute()
+        supabase.rpc("admin_delete_user", {"p_user_id": user_id}).execute()
     except Exception as e:
-        logger.warning(f"Error borrando verification_requests de {user_id}: {e}")
-
-    # 4. Borrar verifications — el doc_hash ya fue copiado a blocked_doc_hashes arriba
-    try:
-        supabase.table("verifications").delete().eq("user_id", user_id).execute()
-    except Exception as e:
-        logger.warning(f"Error borrando verifications de {user_id}: {e}")
-
-    # 5. Borrar perfil
-    try:
-        supabase.table("profiles").delete().eq("id", user_id).execute()
-    except Exception as e:
-        logger.warning(f"Error borrando profile {user_id}: {e}")
-
-    # 6. Borrar de auth via Admin API
-    import httpx as _httpx
-    resp = _httpx.delete(
-        f"{project_url}/auth/v1/admin/users/{user_id}",
-        headers={
-            "Authorization": f"Bearer {service_key}",
-            "apikey": service_key,
-        },
-        timeout=15,
-    )
-    if resp.status_code not in (200, 204):
-        raise HTTPException(
-            status_code=resp.status_code,
-            detail=f"Error Supabase Auth: {resp.text}",
-        )
+        raise HTTPException(status_code=500, detail=f"Error eliminando usuario: {e}")
 
     return {
         "ok": True,
