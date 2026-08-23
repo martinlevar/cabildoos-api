@@ -13,14 +13,17 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 logger = logging.getLogger(__name__)
 
 
+_SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+_SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+
+
 def _verificar_admin(
     authorization: Optional[str] = Header(None),
-    supabase: Client = Depends(get_supabase),
 ) -> str:
     """
     Verifica que el request viene de un master autenticado.
-    Usa el cliente Supabase (service role) para validar el JWT —
-    funciona con HS256 y ECC (P-256) sin requerir un secreto externo.
+    Llama directamente a /auth/v1/user de Supabase via httpx —
+    funciona con HS256 y ECC (P-256) sin depender de supabase-py.
     Un token válido de usuario regular recibe 403, no 401.
     """
     if not authorization or not authorization.startswith("Bearer "):
@@ -29,19 +32,27 @@ def _verificar_admin(
     token = authorization.split(" ")[1]
 
     try:
-        user_resp = supabase.auth.get_user(token)
-        user = user_resp.user
+        resp = httpx.get(
+            f"{_SUPABASE_URL}/auth/v1/user",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": _SUPABASE_SERVICE_KEY,
+            },
+            timeout=10,
+        )
     except Exception as exc:
-        raise HTTPException(status_code=401, detail=f"Token inválido: {exc}")
+        raise HTTPException(status_code=401, detail=f"Error al verificar token: {exc}")
 
-    if not user:
+    if resp.status_code != 200:
         raise HTTPException(status_code=401, detail="Token inválido o expirado")
 
-    app_metadata = (user.app_metadata or {})
+    user_data = resp.json()
+    app_metadata = user_data.get("app_metadata") or {}
+
     if not app_metadata.get("is_master"):
         logger.warning(
             "Acceso denegado a /api/admin — user_id=%s email=%s",
-            user.id, user.email,
+            user_data.get("id"), user_data.get("email"),
         )
         raise HTTPException(status_code=403, detail="Acceso denegado: se requiere rol master")
 
