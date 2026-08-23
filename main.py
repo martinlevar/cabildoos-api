@@ -12,10 +12,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+_is_dev = os.environ.get("ENV", "production").lower() in ("dev", "development", "local")
+
 app = FastAPI(
     title="CabildoOS API",
     version="2.0.0",
     description="Backend de administración para CabildoOS (verificación migrada a Cloudflare Workers)",
+    # Swagger/OpenAPI deshabilitado en producción (expone superficie de ataque)
+    docs_url="/docs" if _is_dev else None,
+    redoc_url="/redoc" if _is_dev else None,
+    openapi_url="/openapi.json" if _is_dev else None,
 )
 
 # ── CORS ───────────────────────────────────────────────────────────────────────
@@ -49,7 +55,6 @@ async def root():
         "service": "CabildoOS API",
         "version": "2.0.0",
         "status": "ok",
-        "docs": "/docs",
         "note": "Verificación de identidad migrada a verify.cabildodevenezuela.com",
     }
 

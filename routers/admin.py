@@ -13,14 +13,39 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 logger = logging.getLogger(__name__)
 
 
-def _verificar_admin(authorization: Optional[str] = Header(None)):
+def _verificar_admin(
+    authorization: Optional[str] = Header(None),
+    supabase: Client = Depends(get_supabase),
+) -> str:
     """
-    Verifica que el request viene de un admin autenticado via Supabase JWT.
-    El frontend manda: Authorization: Bearer <supabase_access_token>
+    Verifica que el request viene de un master autenticado.
+    Usa el cliente Supabase (service role) para validar el JWT —
+    funciona con HS256 y ECC (P-256) sin requerir un secreto externo.
+    Un token válido de usuario regular recibe 403, no 401.
     """
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Token requerido")
-    return authorization.split(" ")[1]
+
+    token = authorization.split(" ")[1]
+
+    try:
+        user_resp = supabase.auth.get_user(token)
+        user = user_resp.user
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail=f"Token inválido: {exc}")
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
+
+    app_metadata = (user.app_metadata or {})
+    if not app_metadata.get("is_master"):
+        logger.warning(
+            "Acceso denegado a /api/admin — user_id=%s email=%s",
+            user.id, user.email,
+        )
+        raise HTTPException(status_code=403, detail="Acceso denegado: se requiere rol master")
+
+    return token
 
 
 @router.get("/status/gemini")
