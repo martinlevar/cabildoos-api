@@ -1,9 +1,11 @@
 import os
 import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import admin, playroom
+from services.gemini import init_gemini
 
 logging.basicConfig(
     level=logging.INFO,
@@ -11,13 +13,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-
 _is_dev = os.environ.get("ENV", "production").lower() in ("dev", "development", "local")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # ── Startup ──
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if gemini_key:
+        init_gemini(gemini_key)
+        logger.info("Gemini client inicializado ✓")
+    else:
+        logger.warning("GEMINI_API_KEY no configurada — endpoints de Playroom no funcionarán")
+    yield
+    # ── Shutdown ──
+
 
 app = FastAPI(
     title="CabildoOS API",
     version="2.0.0",
     description="Backend de administración para CabildoOS (verificación migrada a Cloudflare Workers)",
+    lifespan=lifespan,
     # Swagger/OpenAPI deshabilitado en producción (expone superficie de ataque)
     docs_url="/docs" if _is_dev else None,
     redoc_url="/redoc" if _is_dev else None,
