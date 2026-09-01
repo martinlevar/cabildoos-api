@@ -4,16 +4,18 @@ Reutiliza el cliente ya inicializado en services/gemini.py.
 """
 import asyncio
 import logging
+import random
 
 import services.gemini as _gemini_svc
 from services.gemini import _extract_json
+from google.genai import types as genai_types
 
 logger = logging.getLogger(__name__)
 
 
 # ── Capa de llamada de texto puro (sin imagen) ─────────────────────────────
 
-def _call_text(prompt: str) -> str:
+def _call_text(prompt: str, temperature: float = 1.0) -> str:
     """Llamada sincrónica a Gemini con solo texto — ejecutar en thread separado."""
     client = _gemini_svc._gemini_client
     if client is None:
@@ -22,6 +24,10 @@ def _call_text(prompt: str) -> str:
     response = client.models.generate_content(
         model=_gemini_svc._GEMINI_MODEL,
         contents=prompt,
+        config=genai_types.GenerateContentConfig(
+            temperature=temperature,
+            top_p=0.95,
+        ),
     )
 
     usage = getattr(response, "usage_metadata", None)
@@ -36,6 +42,35 @@ def _call_text(prompt: str) -> str:
 # NERDMOCRACY
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Banco de sub-temas para forzar variedad — se elige uno al azar en cada llamada
+_NERD_SUBTEMAS = [
+    "Simón Bolívar y la Independencia de Venezuela",
+    "Francisco de Miranda y los precursores",
+    "La Constitución venezolana de 1999",
+    "El Caracazo de 1989",
+    "La dictadura de Marcos Pérez Jiménez",
+    "La democracia puntofijista (1958-1998)",
+    "El sistema electoral venezolano",
+    "El Congreso y la Asamblea Nacional de Venezuela",
+    "Geografía política: estados y capitales de Venezuela",
+    "Los derechos fundamentales en la Constitución",
+    "La independencia latinoamericana (Sucre, San Martín, Hidalgo)",
+    "La OPEP y el petróleo venezolano",
+    "Hugo Chávez y la Revolución Bolivariana",
+    "La crisis humanitaria venezolana (migración, servicios)",
+    "Fechas patrias: 19 de Abril, 5 de Julio, 24 de Julio",
+    "Antonio José de Sucre y la Batalla de Ayacucho",
+    "El poder judicial venezolano",
+    "Los partidos políticos históricos de Venezuela (AD, COPEI, MAS)",
+    "La cultura y tradiciones venezolanas (joropo, hallaca, tepuyes)",
+    "Derechos humanos: DDHH y organismos internacionales (OEA, ONU)",
+    "El sistema de gobierno: poderes del Estado venezolano",
+    "Historia del Congreso Nacional de Venezuela",
+    "Venezuela en el contexto latinoamericano (integración, Mercosur, ALBA)",
+    "El proceso de descentralización en Venezuela",
+    "Hitos de la economía venezolana (crisis, boom petrolero)",
+]
+
 async def generar_pregunta_nerdmocracy() -> dict:
     """
     Genera una pregunta de trivia cívica venezolana vía Gemini.
@@ -45,28 +80,28 @@ async def generar_pregunta_nerdmocracy() -> dict:
         options        list[str]  (4 opciones)
         correct_index  int        (0-3)  ← NUNCA enviar al cliente
     """
+    subtema = random.choice(_NERD_SUBTEMAS)
+    seed    = random.randint(1000, 9999)
+
     prompt = (
         'Eres el generador de preguntas de "Nerdmocracy", trivia cívica venezolana.\n\n'
-        "Genera UNA pregunta de trivia sobre uno de estos temas:\n"
-        "- Historia de Venezuela (personajes, fechas clave, eventos)\n"
-        "- Democracia y política venezolana\n"
-        "- Historia latinoamericana relevante\n"
-        "- Derechos humanos y civismo\n"
-        "- Constitución venezolana\n"
-        "- Cultura venezolana general\n\n"
+        f"TEMA OBLIGATORIO para esta pregunta: {subtema}\n"
+        f"Semilla de variación: {seed}\n\n"
+        "Genera UNA pregunta de trivia CONCRETA Y ESPECÍFICA sobre ese tema.\n"
+        "No repitas preguntas genéricas — explora detalles, fechas exactas, nombres, cifras.\n\n"
         "REGLAS CRÍTICAS:\n"
-        "1. La pregunta debe leerse y entenderse en MENOS DE 5 SEGUNDOS — sé conciso\n"
-        "2. Máximo 110 caracteres en la pregunta\n"
-        "3. Factual y verificable (no de opinión)\n"
-        "4. Las 4 opciones deben ser plausibles pero solo UNA correcta\n"
-        "5. Cada opción: máximo 35 caracteres\n\n"
+        "1. Máximo 110 caracteres en la pregunta\n"
+        "2. Factual y verificable\n"
+        "3. Las 4 opciones deben ser plausibles pero solo UNA correcta\n"
+        "4. Cada opción: máximo 35 caracteres\n"
+        "5. Varía el correct_index (no siempre sea 0)\n\n"
         "Responde SOLO con JSON válido, sin texto adicional:\n"
-        '{"question_text":"¿Pregunta?","options":["A","B","C","D"],"correct_index":0}\n\n'
+        '{"question_text":"¿Pregunta?","options":["A","B","C","D"],"correct_index":2}\n\n'
         "correct_index es el índice (0-3) de la opción correcta."
     )
 
     try:
-        text = await asyncio.to_thread(_call_text, prompt)
+        text = await asyncio.to_thread(_call_text, prompt, 1.4)
         data = _extract_json(text)
     except Exception as exc:
         _gemini_svc._record_error(str(exc))
@@ -80,10 +115,12 @@ async def generar_pregunta_nerdmocracy() -> dict:
     if ci not in (0, 1, 2, 3):
         raise ValueError(f"correct_index fuera de rango: {ci}")
 
+    logger.info(f"Nerdmocracy: subtema='{subtema}' seed={seed} correct_index={ci}")
+
     return {
         "question_text": str(data["question_text"])[:160],
         "options":       [str(o)[:60] for o in data["options"][:4]],
-        "correct_index": ci,   # solo para almacenar server-side — nunca retornar al cliente
+        "correct_index": ci,
     }
 
 
@@ -92,13 +129,6 @@ async def generar_pregunta_nerdmocracy() -> dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def generar_escenario_yopresidente(dia: int, historia: list) -> dict:
-    """
-    Genera un escenario de crisis para el día `dia` del mandato.
-
-    Retorna:
-        crisis_text  str
-        options      list[{text: str, risk_level: str}]  (3 opciones)
-    """
     historia_str = ""
     if historia:
         recientes = historia[-5:]
@@ -125,7 +155,7 @@ async def generar_escenario_yopresidente(dia: int, historia: list) -> dict:
     )
 
     try:
-        text = await asyncio.to_thread(_call_text, prompt)
+        text = await asyncio.to_thread(_call_text, prompt, 1.2)
         data = _extract_json(text)
     except Exception as exc:
         _gemini_svc._record_error(str(exc))
@@ -156,15 +186,6 @@ async def generar_consecuencia_yopresidente(
     capital_politico: int,
     salud_mental: int,
 ) -> dict:
-    """
-    Genera las consecuencias narrativas de una decisión presidencial.
-
-    Retorna:
-        consequence_text  str
-        delta_energia     int  (-25 .. +20)
-        delta_capital     int  (-25 .. +20)
-        delta_salud       int  (-25 .. +20)
-    """
     prompt = (
         'Eres el narrador de "Yo, Presidente", juego de rol donde el usuario gobierna Venezuela.\n\n'
         f"Día {dia}. La crisis fue:\n\"{crisis_text}\"\n\n"
@@ -176,7 +197,7 @@ async def generar_consecuencia_yopresidente(
         "Genera las consecuencias narrativas y los cambios en los medidores.\n\n"
         "REGLAS DE BALANCE:\n"
         "  - Cambios entre -25 y +20 por medidor\n"
-        "  - Toda buena decisión implica trade-offs reales (no mejora todo igualmente)\n"
+        "  - Toda buena decisión implica trade-offs reales\n"
         "  - Una decisión mala empeora la mayoría\n"
         "  - Nunca hagas que los tres medidores mejoren exactamente igual\n"
         "  - Sé dramático pero justo\n\n"
@@ -186,7 +207,7 @@ async def generar_consecuencia_yopresidente(
     )
 
     try:
-        text = await asyncio.to_thread(_call_text, prompt)
+        text = await asyncio.to_thread(_call_text, prompt, 1.1)
         data = _extract_json(text)
     except Exception as exc:
         _gemini_svc._record_error(str(exc))
