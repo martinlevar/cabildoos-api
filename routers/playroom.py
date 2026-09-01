@@ -486,6 +486,7 @@ async def yopresidente_submit_decision(
         raise HTTPException(status_code=503, detail="Error de base de datos")
 
     # ── Log de decisión (best-effort, no falla el request) ──
+    # meter_deltas es JSONB en la tabla (columna única para los tres deltas)
     try:
         supabase.table("yopresidente_decisions").insert({
             "user_id":          user_id,
@@ -494,9 +495,11 @@ async def yopresidente_submit_decision(
             "decision_index":   body.decision_index,
             "decision_text":    body.option_text[:180],
             "consequence_text": resultado["consequence_text"][:380],
-            "delta_energia":    resultado["delta_energia"],
-            "delta_capital":    resultado["delta_capital"],
-            "delta_salud":      resultado["delta_salud"],
+            "meter_deltas": {
+                "energia":          resultado["delta_energia"],
+                "capital_politico": resultado["delta_capital"],
+                "salud_mental":     resultado["delta_salud"],
+            },
         }).execute()
     except Exception as exc:
         logger.warning("Error logueando decisión (no crítico) user=%s: %s", user_id, exc)
