@@ -348,7 +348,7 @@ async def enviar_digest(supabase: Client) -> dict:
 
     api_key = os.environ.get("RESEND_API_KEY", "")
     from_email = os.environ.get(
-        "DIGEST_FROM_EMAIL",
+        "RESEND_FROM",
         "Cabildo de Venezuela <digest@cabildodevenezuela.com>"
     )
 
