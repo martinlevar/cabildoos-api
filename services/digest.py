@@ -414,3 +414,28 @@ async def enviar_digest(supabase: Client) -> dict:
         "fecha": datos["fecha_str"],
         "total_destinatarios": len(emails),
     }
+
+
+async def enviar_a_un_email(supabase: Client, email: str) -> dict:
+    """Envía el digest solo a un email específico (para pruebas)."""
+    import resend as resend_sdk
+
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    from_email = os.environ.get("RESEND_FROM", "digest@cabildodevenezuela.com")
+    if not api_key:
+        raise RuntimeError("RESEND_API_KEY no configurado")
+    resend_sdk.api_key = api_key
+
+    datos = await asyncio.to_thread(obtener_datos_ayer, supabase)
+    resumen = await generar_resumen_gemini(datos)
+    html = construir_email_html(datos, resumen)
+    asunto = f"Diario del Cabildo — {datos['fecha_str']}"
+
+    resend_sdk.Emails.send({
+        "from": from_email,
+        "to": [email],
+        "subject": asunto,
+        "html": html,
+    })
+
+    return {"ok": True, "enviado_a": email, "fecha": datos["fecha_str"]}

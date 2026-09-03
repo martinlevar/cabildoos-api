@@ -1,12 +1,13 @@
 import asyncio
 import logging
 import os
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from supabase import Client
 
 from services.digest import (
     enviar_digest,
+    enviar_a_un_email,
     obtener_datos_ayer,
     generar_resumen_gemini,
     construir_email_html,
@@ -54,3 +55,22 @@ async def preview_digest(
     resumen = await generar_resumen_gemini(datos)
     html = construir_email_html(datos, resumen)
     return HTMLResponse(content=html)
+
+
+@router.post("/send-test")
+async def send_digest_test(
+    email: str = Query(..., description="Email al que enviar el digest de prueba"),
+    _: None = Depends(_check_secret),
+    supabase: Client = Depends(get_supabase),
+):
+    """
+    Envía el digest solo a un email específico (para pruebas).
+    Requiere header X-Digest-Secret y query param ?email=tu@email.com
+    """
+    try:
+        result = await enviar_a_un_email(supabase, email)
+        logger.info(f"Digest de prueba enviado a {email}: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error en digest de prueba: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
