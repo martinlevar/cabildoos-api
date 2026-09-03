@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import admin, playroom
+from routers import admin, playroom, digest
 from services.gemini import init_gemini
 
 logging.basicConfig(
@@ -64,6 +64,7 @@ app.add_middleware(
 # ── Routers ────────────────────────────────────────────────────────────────────
 app.include_router(admin.router)
 app.include_router(playroom.router)
+app.include_router(digest.router)
 
 
 @app.get("/")
