@@ -34,8 +34,8 @@ def obtener_datos_ayer(supabase: Client) -> dict:
 
     preguntas_res = supabase.table("questions") \
         .select("id, text, category, description, status, opens_at, closes_at") \
-        .gte("opens_at", start) \
-        .lt("opens_at", end) \
+        .gte("ends_at", start) \
+        .lt("ends_at", end) \
         .execute()
     preguntas = preguntas_res.data or []
 
