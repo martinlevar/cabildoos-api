@@ -941,7 +941,7 @@ async def digest_enviar_admin(
     datos = await _asyncio.to_thread(_obtener_datos_ayer, supabase)
     html = _construir_email_html(datos, body.get("resumen", ""))
     asunto = f"Diario del Cabildo — {datos['fecha_str']}"
-    emails = await _asyncio.to_thread(_obtener_emails_verificados, supabase)
+    emails = body.get("emails_override") or await _asyncio.to_thread(_obtener_emails_verificados, supabase)
 
     enviados, errores = 0, []
     for email in emails:
