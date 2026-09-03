@@ -264,6 +264,7 @@ INSTRUCCIONES IMPORTANTES:
 2. El campo "Nacionalidad / Nationality" en el documento indica la nacionalidad del titular, NO el país emisor. Ambos suelen coincidir, pero usá el encabezado del documento para determinar el país emisor.
 3. Para pais_emisor devolvé SOLO el nombre del país en español, sin prefijos ("Argentina", no "República Argentina").
 4. Documentos con hologramas, reflejos o efectos de seguridad siguen siendo documentos reales — no los descartés como falsos por eso.
+5. FECHA DE VENCIMIENTO: IGNORALA COMPLETAMENTE. Un documento vencido es igual de real que uno vigente. NO evalúes ni menciones si el documento está vencido o vigente. La fecha de vencimiento NO es un criterio de verificación en este sistema. Muchos usuarios venezolanos tienen documentos vencidos por razones políticas ajenas a su voluntad — eso no los hace inválidos para este proceso. `es_documento_real` significa ÚNICAMENTE que el documento es un objeto físico real fotografiado, sin importar su fecha de vencimiento.
 
 Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional ni markdown:
 
@@ -273,7 +274,7 @@ Analizá la imagen y respondé ÚNICAMENTE con JSON válido, sin texto adicional
   "fecha_nacimiento": "DD/MM/YYYY exacto como aparece, null si no es legible",
   "tipo_documento": "{tipo_doc}",
   "pais_emisor": "SOLO el nombre del país en español (ej: 'Argentina', 'Venezuela', 'Colombia'). Si el encabezado dice REPUBLICA ARGENTINA o ARGENTINA, devolvé 'Argentina'. null si no es legible",
-  "es_documento_real": true si es un documento físico real fotografiado (incluyendo documentos con hologramas y efectos de seguridad),
+  "es_documento_real": true si es un documento físico real fotografiado (incluyendo documentos con hologramas, efectos de seguridad, o documentos vencidos — la vigencia NO importa),
   "nombre_coincide": true si el nombre+apellido del documento coincide con "{nombre_declarado} {apellido_declarado}" (ignorá mayúsculas/minúsculas y acentos),
   "numero_coincide": true si el número del documento coincide con "{numero_declarado}" (ignorá puntos y espacios),
   "fecha_coincide": true si la fecha de nacimiento del documento coincide con "{fecha_nac_declarada}" (ignorá formato, comparar día/mes/año). Si no se declaró fecha, devolver false,
