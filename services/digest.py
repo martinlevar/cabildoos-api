@@ -3,9 +3,15 @@ import logging
 import os
 from datetime import datetime, timezone, timedelta
 
+import html as _html
 from supabase import Client
 
 logger = logging.getLogger(__name__)
+
+
+def _esc(s) -> str:
+    """Escape text to ASCII-safe HTML entities."""
+    return _html.escape(str(s or ""), quote=False).encode("ascii", "xmlcharrefreplace").decode("ascii")
 
 VE_OFFSET = timedelta(hours=-4)  # Venezuela UTC-4
 
@@ -184,7 +190,7 @@ async def generar_resumen_gemini(datos: dict) -> str:
 
 
 def construir_email_html(datos: dict, resumen: str) -> str:
-    fecha_str = datos["fecha_str"]
+    fecha_str = _esc(datos["fecha_str"])
     preguntas = datos["preguntas"]
     votos = datos["votos"]
     propuestas = datos["propuestas"]
@@ -200,18 +206,19 @@ def construir_email_html(datos: dict, resumen: str) -> str:
     preguntas_html = ""
     for q in preguntas:
         qid = q["id"]
-        cat = q.get("category", "")
-        texto = q["text"]
+        cat = _esc(q.get("category", ""))
+        texto = _esc(q["text"])
         votos_q = vpq.get(qid, {})
         total_q = sum(votos_q.values())
 
         barras = ""
         for opcion, count in sorted(votos_q.items(), key=lambda x: -x[1]):
             pct = round(count / total_q * 100) if total_q else 0
+            opcion_esc = _esc(opcion)
             barras += f"""
               <div style="margin-bottom:8px;">
                 <div style="display:flex;justify-content:space-between;font-size:13px;color:#334155;margin-bottom:3px;">
-                  <span>{opcion}</span><span style="font-weight:600;">{count} ({pct}%)</span>
+                  <span>{opcion_esc}</span><span style="font-weight:600;">{count} ({pct}%)</span>
                 </div>
                 <div style="background:#e2e8f0;border-radius:4px;height:7px;">
                   <div style="background:#C9A84C;border-radius:4px;height:7px;width:{pct}%;"></div>
@@ -235,9 +242,9 @@ def construir_email_html(datos: dict, resumen: str) -> str:
     # Propuestas block
     propuestas_html = ""
     for p in propuestas[:5]:
-        cat = p.get("cat", "")
-        texto = p["text"][:200]
-        likes = p.get("likes", 0)
+        cat = _esc(p.get("cat", ""))
+        texto = _esc(p["text"][:200])
+        likes = int(p.get("likes", 0) or 0)
         propuestas_html += f"""
         <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:10px;">
           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#C9A84C;margin-bottom:4px;">{cat}</div>
@@ -248,9 +255,9 @@ def construir_email_html(datos: dict, resumen: str) -> str:
     if not propuestas_html:
         propuestas_html = '<p style="color:#94a3b8;font-size:14px;margin:0;">No hubo propuestas ciudadanas ayer.</p>'
 
-    # Resumen paragraphs
+    # Resumen paragraphs — escape each paragraph individually
     resumen_html = "".join(
-        f'<p style="color:#334155;font-size:15px;line-height:1.75;margin:0 0 14px 0;">{p.strip()}</p>'
+        f'<p style="color:#334155;font-size:15px;line-height:1.75;margin:0 0 14px 0;">{_esc(p.strip())}</p>'
         for p in resumen.split("\n") if p.strip()
     )
 
