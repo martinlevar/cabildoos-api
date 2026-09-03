@@ -877,3 +877,80 @@ async def delete_system_error(
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Secretaría / Digest ────────────────────────────────────────────────────
+
+import asyncio as _asyncio
+from services.digest import (
+    obtener_datos_ayer as _obtener_datos_ayer,
+    generar_resumen_gemini as _generar_resumen_gemini,
+    construir_email_html as _construir_email_html,
+    obtener_emails_verificados as _obtener_emails_verificados,
+)
+
+
+@router.get("/digest/datos")
+async def digest_datos(
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Carga datos del digest del día anterior + resumen Gemini + HTML preview."""
+    datos = await _asyncio.to_thread(_obtener_datos_ayer, supabase)
+    resumen = await _generar_resumen_gemini(datos)
+    html = _construir_email_html(datos, resumen)
+    return {
+        "fecha_str": datos["fecha_str"],
+        "resumen": resumen,
+        "html": html,
+        "stats": {
+            "preguntas": len(datos["preguntas"]),
+            "votos": len(datos["votos"]),
+            "mensajes": len(datos["mensajes"]),
+            "propuestas": len(datos["propuestas"]),
+        },
+    }
+
+
+@router.post("/digest/preview-custom")
+async def digest_preview_custom(
+    body: dict,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Reconstruye el HTML con un resumen editado por el admin."""
+    datos = await _asyncio.to_thread(_obtener_datos_ayer, supabase)
+    html = _construir_email_html(datos, body.get("resumen", ""))
+    return {"html": html}
+
+
+@router.post("/digest/enviar")
+async def digest_enviar_admin(
+    body: dict,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Envía el digest a todos los usuarios verificados usando el resumen aprobado."""
+    import os, resend as resend_sdk
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    from_email = os.environ.get("RESEND_FROM", "digest@cabildodevenezuela.com")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="RESEND_API_KEY no configurado")
+    resend_sdk.api_key = api_key
+
+    datos = await _asyncio.to_thread(_obtener_datos_ayer, supabase)
+    html = _construir_email_html(datos, body.get("resumen", ""))
+    asunto = f"Diario del Cabildo — {datos['fecha_str']}"
+    emails = await _asyncio.to_thread(_obtener_emails_verificados, supabase)
+
+    enviados, errores = 0, []
+    for email in emails:
+        try:
+            resend_sdk.Emails.send({"from": from_email, "to": [email], "subject": asunto, "html": html})
+            enviados += 1
+        except Exception as e:
+            errores.append(str(e))
+            logger.error(f"Error enviando digest a {email}: {e}")
+
+    return {"ok": True, "enviados": enviados, "errores": len(errores),
+            "fecha": datos["fecha_str"], "total_destinatarios": len(emails)}
