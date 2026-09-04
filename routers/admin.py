@@ -973,8 +973,10 @@ async def digest_enviar_admin(
             "tipo": "digest",
             "titulo": asunto,
             "html": html,
+            "resumen": body.get("resumen", ""),
             "enviados": enviados,
             "errores": len(errores),
+            "estado": "publicado",
         }).execute()
     except Exception as e:
         logger.error(f"Error guardando comunicado en historial: {e}")
@@ -1052,8 +1054,10 @@ async def voceria_enviar(
             "tipo": "voceria",
             "titulo": titulo,
             "html": html,
+            "texto": texto,
             "enviados": enviados,
             "errores": len(errores),
+            "estado": "publicado",
         }).execute()
     except Exception as e:
         logger.error(f"Error guardando comunicado en historial: {e}")
@@ -1069,13 +1073,56 @@ async def listar_comunicados(
     token: str = Depends(_verificar_admin),
     supabase: Client = Depends(get_supabase),
 ):
-    """Lista los últimos 100 comunicados enviados."""
+    """Lista los últimos 100 comunicados (guardados y publicados)."""
     res = supabase.table("comunicados") \
-        .select("id, tipo, titulo, enviados, errores, created_at") \
+        .select("id, tipo, titulo, enviados, errores, estado, created_at") \
         .order("created_at", desc=True) \
         .limit(100) \
         .execute()
     return res.data or []
+
+
+@router.post("/comunicados/guardar")
+async def guardar_comunicado(
+    body: dict,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Guarda un comunicado como borrador sin enviarlo."""
+    tipo = body.get("tipo")
+    if tipo not in ("digest", "voceria"):
+        raise HTTPException(status_code=400, detail="tipo inválido")
+
+    if tipo == "digest":
+        resumen = body.get("resumen", "")
+        datos = await _asyncio.to_thread(_obtener_datos_ayer, supabase)
+        html = _construir_email_html(datos, resumen)
+        titulo = f"Diario del Cabildo — {datos['fecha_str']}"
+        record = {
+            "tipo": "digest",
+            "titulo": titulo,
+            "html": html,
+            "resumen": resumen,
+            "enviados": 0,
+            "errores": 0,
+            "estado": "guardado",
+        }
+    else:
+        titulo = body.get("titulo", "Comunicado del Cabildo")
+        texto = body.get("texto", "")
+        html = _construir_email_anuncio(titulo, texto)
+        record = {
+            "tipo": "voceria",
+            "titulo": titulo,
+            "html": html,
+            "texto": texto,
+            "enviados": 0,
+            "errores": 0,
+            "estado": "guardado",
+        }
+
+    res = supabase.table("comunicados").insert(record).execute()
+    return {"ok": True, "id": res.data[0]["id"]}
 
 
 @router.get("/comunicados/{comunicado_id}/html")
@@ -1094,3 +1141,60 @@ async def get_comunicado_html(
     if not res.data:
         raise HTTPException(status_code=404, detail="Comunicado no encontrado")
     return HTMLResponse(content=res.data["html"])
+
+
+@router.get("/comunicados/{comunicado_id}")
+async def get_comunicado(
+    comunicado_id: str,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Devuelve los datos completos de un comunicado (para editar)."""
+    res = supabase.table("comunicados") \
+        .select("id, tipo, titulo, texto, resumen, html, estado, enviados, errores, created_at") \
+        .eq("id", comunicado_id) \
+        .single() \
+        .execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Comunicado no encontrado")
+    return res.data
+
+
+@router.post("/comunicados/{comunicado_id}/enviar")
+async def enviar_comunicado_guardado(
+    comunicado_id: str,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Envía un comunicado que estaba guardado como borrador."""
+    res = supabase.table("comunicados") \
+        .select("*") \
+        .eq("id", comunicado_id) \
+        .single() \
+        .execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Comunicado no encontrado")
+    c = res.data
+    if c.get("estado") != "guardado":
+        raise HTTPException(status_code=400, detail="El comunicado ya fue publicado")
+
+    html = c["html"]
+    asunto = c["titulo"]
+    emails = await _asyncio.to_thread(_obtener_emails_verificados, supabase)
+
+    enviados, errores = 0, []
+    for email in emails:
+        try:
+            await _asyncio.to_thread(_enviar_email, email, asunto, "", html)
+            enviados += 1
+        except Exception as e:
+            errores.append(str(e))
+            logger.error(f"Error enviando comunicado guardado a {email}: {e}")
+
+    supabase.table("comunicados").update({
+        "estado": "publicado",
+        "enviados": enviados,
+        "errores": len(errores),
+    }).eq("id", comunicado_id).execute()
+
+    return {"ok": True, "enviados": enviados, "errores": len(errores)}
