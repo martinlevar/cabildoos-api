@@ -469,18 +469,33 @@ https://cabildodevenezuela.com
 CabildoOS · Si no iniciaste este proceso, ignorá este email."""
 
 
-def _enviar_email(to_email: str, subject: str, body_text: str, body_html: str | None = None):
+def _html_to_text(html: str) -> str:
+    """Genera versión texto plano desde HTML — elimina tags y decodifica entidades."""
+    import re, html as _html_mod
+    text = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+    text = re.sub(r"</(?:p|div|tr|li|h\d)[^>]*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = _html_mod.unescape(text)
+    # Colapsar múltiples líneas en blanco
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _enviar_email(to_email: str, subject: str, body_text: str = "", body_html: str | None = None):
     """
     Envía un email vía Resend (https://resend.com).
-    Variable de entorno requerida: RESEND_API_KEY
-    Variable opcional: RESEND_FROM  (default: noreply@cabildodevenezuela.com)
+    Variables de entorno:
+      RESEND_API_KEY  — requerida
+      RESEND_FROM     — opcional (default: Cabildo de Venezuela <hola@cabildodevenezuela.com>)
+      RESEND_REPLY_TO — opcional (default: igual que RESEND_FROM)
 
     IMPORTANTE para evitar spam:
       - El dominio del FROM debe estar verificado en Resend con SPF + DKIM configurados.
       - En Resend > Domains: agregar cabildodevenezuela.com y copiar los registros DNS.
     """
-    api_key = os.environ.get("RESEND_API_KEY", "")
-    from_   = os.environ.get("RESEND_FROM", "CabildoOS <noreply@cabildodevenezuela.com>")
+    api_key   = os.environ.get("RESEND_API_KEY", "")
+    from_     = os.environ.get("RESEND_FROM", "Cabildo de Venezuela <hola@cabildodevenezuela.com>")
+    reply_to  = os.environ.get("RESEND_REPLY_TO", from_)
 
     if not api_key:
         raise ValueError("RESEND_API_KEY no configurada")
@@ -491,14 +506,19 @@ def _enviar_email(to_email: str, subject: str, body_text: str, body_html: str | 
 <pre style="white-space:pre-wrap;font-family:Arial,sans-serif">{body_text}</pre>
 </body></html>"""
 
+    # Si no se pasa texto plano, generarlo desde el HTML (crítico para Gmail Primary)
+    if not body_text:
+        body_text = _html_to_text(body_html)
+
     payload = {
-        "from":    from_,
-        "to":      [to_email],
-        "subject": subject,
-        "html":    body_html,
-        "text":    body_text,
-        # Headers que mejoran deliverability y evitan clasificación como spam
+        "from":     from_,
+        "reply_to": reply_to,
+        "to":       [to_email],
+        "subject":  subject,
+        "html":     body_html,
+        "text":     body_text,
         "headers": {
+            # ID único por destinatario — evita que Gmail agrupe envíos como campaña
             "X-Entity-Ref-ID": f"cabildoos-{to_email}",
         },
     }
@@ -931,13 +951,6 @@ async def digest_enviar_admin(
     supabase: Client = Depends(get_supabase),
 ):
     """Envía el digest a todos los usuarios verificados usando el resumen aprobado."""
-    import os, resend as resend_sdk
-    api_key = os.environ.get("RESEND_API_KEY", "")
-    from_email = os.environ.get("RESEND_FROM", "digest@cabildodevenezuela.com")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="RESEND_API_KEY no configurado")
-    resend_sdk.api_key = api_key
-
     datos = await _asyncio.to_thread(_obtener_datos_ayer, supabase)
     html = _construir_email_html(datos, body.get("resumen", ""))
     asunto = f"Diario del Cabildo — {datos['fecha_str']}"
@@ -946,7 +959,7 @@ async def digest_enviar_admin(
     enviados, errores = 0, []
     for email in emails:
         try:
-            resend_sdk.Emails.send({"from": from_email, "to": [email], "subject": asunto, "html": html})
+            await _asyncio.to_thread(_enviar_email, email, asunto, "", html)
             enviados += 1
         except Exception as e:
             errores.append(str(e))
@@ -1001,13 +1014,6 @@ async def voceria_enviar(
     supabase: Client = Depends(get_supabase),
 ):
     """Envía el comunicado a todos los usuarios verificados (o a emails_override)."""
-    import os, resend as resend_sdk
-    api_key = os.environ.get("RESEND_API_KEY", "")
-    from_email = os.environ.get("RESEND_FROM", "digest@cabildodevenezuela.com")
-    if not api_key:
-        raise HTTPException(status_code=500, detail="RESEND_API_KEY no configurado")
-    resend_sdk.api_key = api_key
-
     titulo = body.get("titulo", "Comunicado del Cabildo")
     texto = body.get("texto", "")
     if not texto.strip():
@@ -1020,7 +1026,7 @@ async def voceria_enviar(
     enviados, errores = 0, []
     for email in emails:
         try:
-            resend_sdk.Emails.send({"from": from_email, "to": [email], "subject": asunto, "html": html})
+            await _asyncio.to_thread(_enviar_email, email, asunto, "", html)
             enviados += 1
         except Exception as e:
             errores.append(str(e))
