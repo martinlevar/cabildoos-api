@@ -954,3 +954,77 @@ async def digest_enviar_admin(
 
     return {"ok": True, "enviados": enviados, "errores": len(errores),
             "fecha": datos["fecha_str"], "total_destinatarios": len(emails)}
+
+
+# ── Vocería del Cabildo ────────────────────────────────────────────────────
+
+from services.voceria import (
+    generar_anuncio_gemini as _generar_anuncio_gemini,
+    construir_email_anuncio as _construir_email_anuncio,
+)
+
+
+@router.post("/voceria/generar")
+async def voceria_generar(
+    body: dict,
+    token: str = Depends(_verificar_admin),
+):
+    """Recibe el prompt del admin y devuelve título + texto generado por Gemini + HTML preview."""
+    prompt = body.get("prompt", "").strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Falta el campo 'prompt'")
+    resultado = await _generar_anuncio_gemini(prompt)
+    html = _construir_email_anuncio(resultado["titulo"], resultado["texto"])
+    return {
+        "titulo": resultado["titulo"],
+        "texto": resultado["texto"],
+        "html": html,
+    }
+
+
+@router.post("/voceria/preview-custom")
+async def voceria_preview_custom(
+    body: dict,
+    token: str = Depends(_verificar_admin),
+):
+    """Reconstruye el HTML con título y texto editados por el admin."""
+    titulo = body.get("titulo", "Comunicado del Cabildo")
+    texto = body.get("texto", "")
+    html = _construir_email_anuncio(titulo, texto)
+    return {"html": html}
+
+
+@router.post("/voceria/enviar")
+async def voceria_enviar(
+    body: dict,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Envía el comunicado a todos los usuarios verificados (o a emails_override)."""
+    import os, resend as resend_sdk
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    from_email = os.environ.get("RESEND_FROM", "digest@cabildodevenezuela.com")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="RESEND_API_KEY no configurado")
+    resend_sdk.api_key = api_key
+
+    titulo = body.get("titulo", "Comunicado del Cabildo")
+    texto = body.get("texto", "")
+    if not texto.strip():
+        raise HTTPException(status_code=400, detail="El texto del comunicado no puede estar vacío")
+
+    html = _construir_email_anuncio(titulo, texto)
+    asunto = titulo
+    emails = body.get("emails_override") or await _asyncio.to_thread(_obtener_emails_verificados, supabase)
+
+    enviados, errores = 0, []
+    for email in emails:
+        try:
+            resend_sdk.Emails.send({"from": from_email, "to": [email], "subject": asunto, "html": html})
+            enviados += 1
+        except Exception as e:
+            errores.append(str(e))
+            logger.error(f"Error enviando vocería a {email}: {e}")
+
+    return {"ok": True, "enviados": enviados, "errores": len(errores),
+            "total_destinatarios": len(emails)}
