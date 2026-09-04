@@ -967,6 +967,18 @@ async def digest_enviar_admin(
             errores.append(str(e))
             logger.error(f"Error enviando digest a {email}: {e}")
 
+    # Guardar en historial
+    try:
+        supabase.table("comunicados").insert({
+            "tipo": "digest",
+            "titulo": asunto,
+            "html": html,
+            "enviados": enviados,
+            "errores": len(errores),
+        }).execute()
+    except Exception as e:
+        logger.error(f"Error guardando comunicado en historial: {e}")
+
     return {"ok": True, "enviados": enviados, "errores": len(errores),
             "fecha": datos["fecha_str"], "total_destinatarios": len(emails)}
 
@@ -1034,5 +1046,51 @@ async def voceria_enviar(
             errores.append(str(e))
             logger.error(f"Error enviando vocería a {email}: {e}")
 
+    # Guardar en historial
+    try:
+        supabase.table("comunicados").insert({
+            "tipo": "voceria",
+            "titulo": titulo,
+            "html": html,
+            "enviados": enviados,
+            "errores": len(errores),
+        }).execute()
+    except Exception as e:
+        logger.error(f"Error guardando comunicado en historial: {e}")
+
     return {"ok": True, "enviados": enviados, "errores": len(errores),
             "total_destinatarios": len(emails)}
+
+
+# ── Historial de comunicados ───────────────────────────────────────────────
+
+@router.get("/comunicados")
+async def listar_comunicados(
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Lista los últimos 100 comunicados enviados."""
+    res = supabase.table("comunicados") \
+        .select("id, tipo, titulo, enviados, errores, created_at") \
+        .order("created_at", desc=True) \
+        .limit(100) \
+        .execute()
+    return res.data or []
+
+
+@router.get("/comunicados/{comunicado_id}/html")
+async def get_comunicado_html(
+    comunicado_id: str,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Devuelve el HTML de un comunicado para previsualización o PDF."""
+    from fastapi.responses import HTMLResponse
+    res = supabase.table("comunicados") \
+        .select("html, titulo") \
+        .eq("id", comunicado_id) \
+        .single() \
+        .execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Comunicado no encontrado")
+    return HTMLResponse(content=res.data["html"])
