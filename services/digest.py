@@ -76,47 +76,10 @@ def obtener_datos_ayer(supabase: Client) -> dict:
 
 def obtener_emails_verificados(supabase: Client) -> list:
     """Devuelve todos los emails de usuarios con verificación aprobada.
-    Pagina de a 1000 para no truncar con el límite por defecto de PostgREST."""
-    profiles = []
-    page_size = 1000
-    offset = 0
-    while True:
-        res = supabase.table("profiles") \
-            .select("email, verification_id") \
-            .not_.is_("verification_id", "null") \
-            .not_.is_("email", "null") \
-            .range(offset, offset + page_size - 1) \
-            .execute()
-        batch = res.data or []
-        profiles.extend(batch)
-        if len(batch) < page_size:
-            break
-        offset += page_size
-
-    if not profiles:
-        return []
-
-    ver_ids = list({p["verification_id"] for p in profiles if p.get("verification_id")})
-    if not ver_ids:
-        return []
-
-    # Paginar verifications también si hay muchos IDs (evita URL demasiado larga)
-    aprobadas_ids: set = set()
-    chunk_size = 200
-    for i in range(0, len(ver_ids), chunk_size):
-        chunk = ver_ids[i:i + chunk_size]
-        res = supabase.table("verifications") \
-            .select("id") \
-            .in_("id", chunk) \
-            .eq("status", "aprobado") \
-            .execute()
-        aprobadas_ids.update(v["id"] for v in (res.data or []))
-
-    return list({
-        p["email"]
-        for p in profiles
-        if p.get("verification_id") in aprobadas_ids and p.get("email")
-    })
+    Usa la función SQL get_emails_verificados() que hace JOIN con auth.users
+    para cubrir usuarios cuyo email no está en la tabla profiles."""
+    res = supabase.rpc("get_emails_verificados").execute()
+    return [row["email"] for row in (res.data or []) if row.get("email")]
 
 
 def _votos_por_pregunta(votos: list) -> dict:
