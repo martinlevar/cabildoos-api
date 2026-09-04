@@ -216,6 +216,7 @@ def _arco_svg_bg() -> str:
 
 
 LOGO_DATA = "https://cabildodevenezuela.com/logo-cabildo.jpg"
+ARC_URL   = "https://cabildodevenezuela.com/email-arc.png"
 
 def construir_email_html(datos: dict, resumen: str) -> str:
     preguntas  = datos["preguntas"]
@@ -301,7 +302,7 @@ def construir_email_html(datos: dict, resumen: str) -> str:
         for par in resumen.split("\n") if par.strip()
     )
 
-    ARC_BG = _arco_svg_bg()
+    ARC_BG = ARC_URL
 
     return f"""<!DOCTYPE html>
 <html lang="es">

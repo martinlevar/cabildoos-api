@@ -92,9 +92,9 @@ async def generar_anuncio_gemini(prompt_admin: str) -> dict:
 
 def construir_email_anuncio(titulo: str, texto: str) -> str:
     """Construye el HTML del email de vocería con la misma identidad visual del digest."""
-    from services.digest import _arco_svg_bg, LOGO_DATA
+    from services.digest import ARC_URL, LOGO_DATA
 
-    ARC_BG = _arco_svg_bg()
+    ARC_BG = ARC_URL
 
     titulo_esc = _esc(titulo)
 
