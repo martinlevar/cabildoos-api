@@ -302,7 +302,7 @@ def construir_email_html(datos: dict, resumen: str) -> str:
         for par in resumen.split("\n") if par.strip()
     )
 
-    ARC_BG = _arco_svg_bg()
+    HEADER_IMG = "https://cabildodevenezuela.com/email-header.png"
 
     return f"""<!DOCTYPE html>
 <html lang="es">
@@ -316,9 +316,13 @@ def construir_email_html(datos: dict, resumen: str) -> str:
 <tr><td align="center">
 <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;">
 
-  <!-- HEADER -->
-  <tr><td style="background:#0a0f1e;background-image:url('{ARC_BG}');background-size:cover;background-position:center top;border-radius:16px 16px 0 0;padding:48px 48px 36px;text-align:center;border-bottom:1px solid #1e3a5f;">
-    <img src="{LOGO_DATA}" width="120" height="120" alt="Cabildo de Venezuela" style="display:block;margin:0 auto 20px;border-radius:50%;object-fit:cover;">
+  <!-- HEADER IMAGE (arc + logo) -->
+  <tr><td style="background:#0a0f1e;border-radius:16px 16px 0 0;padding:0;text-align:center;font-size:0;line-height:0;">
+    <img src="{HEADER_IMG}" width="580" height="220" alt="Cabildo de Venezuela" style="display:block;width:100%;max-width:580px;border-radius:16px 16px 0 0;border:0;">
+  </td></tr>
+
+  <!-- HEADER TEXT -->
+  <tr><td style="background:#0a0f1e;padding:0 48px 32px;text-align:center;border-bottom:1px solid #1e3a5f;">
     <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.55);margin-bottom:8px;">Diario de Sesiones</div>
     <div style="font-size:14px;color:rgba(255,255,255,0.8);font-weight:500;">{fecha_esc}</div>
   </td></tr>

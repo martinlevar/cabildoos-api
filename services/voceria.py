@@ -90,12 +90,11 @@ async def generar_anuncio_gemini(prompt_admin: str) -> dict:
 
 # ── Email HTML ──────────────────────────────────────────────────────────────
 
+HEADER_IMG = "https://cabildodevenezuela.com/email-header.png"
+
+
 def construir_email_anuncio(titulo: str, texto: str) -> str:
     """Construye el HTML del email de vocería con la misma identidad visual del digest."""
-    from services.digest import _arco_svg_bg, LOGO_DATA
-
-    ARC_BG = _arco_svg_bg()
-
     titulo_esc = _esc(titulo)
 
     parrafos_html = "".join(
@@ -115,9 +114,13 @@ def construir_email_anuncio(titulo: str, texto: str) -> str:
   <tr><td align="center">
     <table role="presentation" width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#ffffff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,0.10);overflow:hidden;">
 
-      <!-- HEADER -->
-      <tr><td style="background:#0a0f1e;background-image:url('{ARC_BG}');background-size:cover;background-position:center top;border-radius:16px 16px 0 0;padding:48px 48px 36px;text-align:center;border-bottom:1px solid #1e3a5f;">
-        <img src="{LOGO_DATA}" width="120" height="120" alt="Cabildo de Venezuela" style="display:block;margin:0 auto 20px;border-radius:50%;object-fit:cover;">
+      <!-- HEADER IMAGE (arc + logo) -->
+      <tr><td style="background:#0a0f1e;border-radius:16px 16px 0 0;padding:0;text-align:center;font-size:0;line-height:0;">
+        <img src="{HEADER_IMG}" width="580" height="220" alt="Cabildo de Venezuela" style="display:block;width:100%;max-width:580px;border-radius:16px 16px 0 0;border:0;">
+      </td></tr>
+
+      <!-- HEADER TEXT -->
+      <tr><td style="background:#0a0f1e;padding:0 48px 32px;text-align:center;border-bottom:1px solid #1e3a5f;">
         <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.55);margin-bottom:8px;">Vocería del Cabildo</div>
         <div style="font-size:22px;font-weight:800;color:#ffffff;line-height:1.3;max-width:440px;margin:0 auto;">{titulo_esc}</div>
       </td></tr>
