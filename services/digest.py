@@ -216,14 +216,27 @@ def construir_email_html(datos: dict, resumen: str) -> str:
         for opcion, count in sorted(votos_q.items(), key=lambda x: -x[1]):
             pct = round(count / total_q * 100) if total_q else 0
             opcion_esc = _esc(opcion)
+            opcion_lower = opcion.lower().strip()
+            if opcion_lower in ("sí", "si", "yes"):
+                bar_color = "#16a34a"
+                label_color = "#15803d"
+            elif opcion_lower in ("no",):
+                bar_color = "#dc2626"
+                label_color = "#b91c1c"
+            elif "abstenci" in opcion_lower:
+                bar_color = "#9ca3af"
+                label_color = "#6b7280"
+            else:
+                bar_color = "#1e3a5f"
+                label_color = "#1e3a5f"
             barras += f"""
             <div style="margin-bottom:10px;">
               <div style="display:flex;justify-content:space-between;margin-bottom:3px;">
-                <span style="font-size:13px;color:#374151;">{opcion_esc}</span>
-                <span style="font-size:13px;font-weight:600;color:#1e3a5f;">{pct}%  ({count})</span>
+                <span style="font-size:13px;color:#374151;font-weight:500;">{opcion_esc}</span>
+                <span style="font-size:13px;font-weight:700;color:{label_color};">{pct}% ({count})</span>
               </div>
-              <div style="background:#f3f4f6;border-radius:999px;height:4px;overflow:hidden;">
-                <div style="width:{pct}%;background:#1e3a5f;height:4px;border-radius:999px;"></div>
+              <div style="background:#f3f4f6;border-radius:999px;height:5px;overflow:hidden;">
+                <div style="width:{pct}%;background:{bar_color};height:5px;border-radius:999px;"></div>
               </div>
             </div>"""
         if not barras:
@@ -255,7 +268,8 @@ def construir_email_html(datos: dict, resumen: str) -> str:
         propuestas_html = '<p style="font-size:14px;color:#9ca3af;margin:0;padding:16px 0;">No hubo propuestas ayer.</p>'
 
     # Resumen
-    parrafos_html = "".join(
+    saludo_html = '<p style="font-size:15px;color:#374151;line-height:1.8;margin:0 0 16px 0;font-weight:600;">Estimados ciudadanos venezolanos,</p>'
+    parrafos_html = saludo_html + "".join(
         f'<p style="font-size:15px;color:#374151;line-height:1.8;margin:0 0 16px 0;">{_esc(par.strip())}</p>'
         for par in resumen.split("\n") if par.strip()
     )
@@ -275,10 +289,10 @@ def construir_email_html(datos: dict, resumen: str) -> str:
 <table width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;">
 
   <!-- HEADER -->
-  <tr><td style="background:#ffffff;border-radius:16px 16px 0 0;padding:48px 48px 32px;text-align:center;border-bottom:1px solid #f3f4f6;">
-    <img src="{LOGO_DATA}" width="80" height="80" alt="Cabildo de Venezuela" style="border-radius:50%;display:block;margin:0 auto 20px;">
-    <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#9ca3af;margin-bottom:8px;">Diario de Sesiones</div>
-    <div style="font-size:13px;color:#6b7280;">{fecha_esc}</div>
+  <tr><td style="background:#0f1e38;background:linear-gradient(150deg,#060b14 0%,#0f1e38 50%,#1e3a5f 100%);border-radius:16px 16px 0 0;padding:48px 48px 36px;text-align:center;border-bottom:1px solid #1e3a5f;">
+    <img src="{LOGO_DATA}" width="120" height="120" alt="Cabildo de Venezuela" style="border-radius:50%;display:block;margin:0 auto 24px;border:3px solid rgba(255,255,255,0.15);">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.5);margin-bottom:8px;">Diario de Sesiones</div>
+    <div style="font-size:13px;color:rgba(255,255,255,0.7);">{fecha_esc}</div>
   </td></tr>
 
   <!-- STATS -->
