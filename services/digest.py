@@ -75,27 +75,42 @@ def obtener_datos_ayer(supabase: Client) -> dict:
 
 
 def obtener_emails_verificados(supabase: Client) -> list:
-    profiles_res = supabase.table("profiles") \
-        .select("email, verification_id") \
-        .not_.is_("verification_id", "null") \
-        .not_.is_("email", "null") \
-        .execute()
+    """Devuelve todos los emails de usuarios con verificación aprobada.
+    Pagina de a 1000 para no truncar con el límite por defecto de PostgREST."""
+    profiles = []
+    page_size = 1000
+    offset = 0
+    while True:
+        res = supabase.table("profiles") \
+            .select("email, verification_id") \
+            .not_.is_("verification_id", "null") \
+            .not_.is_("email", "null") \
+            .range(offset, offset + page_size - 1) \
+            .execute()
+        batch = res.data or []
+        profiles.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
 
-    profiles = profiles_res.data or []
     if not profiles:
         return []
 
-    ver_ids = [p["verification_id"] for p in profiles if p.get("verification_id")]
+    ver_ids = list({p["verification_id"] for p in profiles if p.get("verification_id")})
     if not ver_ids:
         return []
 
-    aprobadas_res = supabase.table("verifications") \
-        .select("id") \
-        .in_("id", ver_ids) \
-        .eq("status", "aprobado") \
-        .execute()
-
-    aprobadas_ids = {v["id"] for v in (aprobadas_res.data or [])}
+    # Paginar verifications también si hay muchos IDs (evita URL demasiado larga)
+    aprobadas_ids: set = set()
+    chunk_size = 200
+    for i in range(0, len(ver_ids), chunk_size):
+        chunk = ver_ids[i:i + chunk_size]
+        res = supabase.table("verifications") \
+            .select("id") \
+            .in_("id", chunk) \
+            .eq("status", "aprobado") \
+            .execute()
+        aprobadas_ids.update(v["id"] for v in (res.data or []))
 
     return list({
         p["email"]
