@@ -117,7 +117,7 @@ def construir_email_anuncio(titulo: str, texto: str) -> str:
 
       <!-- HEADER -->
       <tr><td style="background:#0a0f1e;background-image:url('{ARC_BG}');background-size:cover;background-position:center top;border-radius:16px 16px 0 0;padding:48px 48px 36px;text-align:center;border-bottom:1px solid #1e3a5f;">
-        <img src="{LOGO_DATA}" width="120" height="120" alt="Cabildo de Venezuela" style="display:block;margin:0 auto 20px;">
+        <img src="{LOGO_DATA}" width="120" height="120" alt="Cabildo de Venezuela" style="display:block;margin:0 auto 20px;border-radius:50%;object-fit:cover;">
         <div style="font-size:11px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:rgba(255,255,255,0.55);margin-bottom:8px;">Vocería del Cabildo</div>
         <div style="font-size:22px;font-weight:800;color:#ffffff;line-height:1.3;max-width:440px;margin:0 auto;">{titulo_esc}</div>
       </td></tr>
