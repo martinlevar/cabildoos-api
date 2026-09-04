@@ -1090,7 +1090,7 @@ async def guardar_comunicado(
 ):
     """Guarda un comunicado como borrador sin enviarlo."""
     tipo = body.get("tipo")
-    if tipo not in ("digest", "voceria"):
+    if tipo not in ("digest", "voceria", "redes"):
         raise HTTPException(status_code=400, detail="tipo inválido")
 
     if tipo == "digest":
@@ -1103,6 +1103,24 @@ async def guardar_comunicado(
             "titulo": titulo,
             "html": html,
             "resumen": resumen,
+            "enviados": 0,
+            "errores": 0,
+            "estado": "guardado",
+        }
+    elif tipo == "redes":
+        titulo = body.get("titulo", "Comunicado")
+        texto_x       = body.get("texto_x", "")
+        texto_ig_post = body.get("texto_ig_post", "")
+        texto_ig_story = body.get("texto_ig_story", "")
+        flyer_x       = body.get("flyer_x", "")
+        flyer_ig_post = body.get("flyer_ig_post", "")
+        flyer_ig_story = body.get("flyer_ig_story", "")
+        record = {
+            "tipo": "redes",
+            "titulo": titulo,
+            "html": flyer_ig_post or flyer_x or "",  # HTML principal para preview
+            "texto": texto_ig_post,  # reutilizamos texto para ig_post caption
+            "resumen": texto_x,      # reutilizamos resumen para texto X
             "enviados": 0,
             "errores": 0,
             "estado": "guardado",
@@ -1198,3 +1216,51 @@ async def enviar_comunicado_guardado(
     }).eq("id", comunicado_id).execute()
 
     return {"ok": True, "enviados": enviados, "errores": len(errores)}
+
+
+@router.delete("/comunicados/{comunicado_id}")
+async def eliminar_comunicado(
+    comunicado_id: str,
+    token: str = Depends(_verificar_admin),
+    supabase: Client = Depends(get_supabase),
+):
+    """Elimina un comunicado del historial."""
+    res = supabase.table("comunicados").delete().eq("id", comunicado_id).execute()
+    return {"ok": True}
+
+
+# ── Redes Sociales ─────────────────────────────────────────────────────────
+
+from services.redes import (
+    generar_contenido_redes as _generar_contenido_redes,
+    generar_flyer_x as _generar_flyer_x,
+    generar_flyer_igpost as _generar_flyer_igpost,
+    generar_flyer_igstory as _generar_flyer_igstory,
+)
+
+
+@router.post("/redes/generar")
+async def redes_generar(
+    body: dict,
+    token: str = Depends(_verificar_admin),
+):
+    """Recibe titulo+texto de un comunicado y devuelve contenido adaptado para X, IG Post e IG Story + flyers HTML."""
+    titulo = body.get("titulo", "").strip()
+    texto  = body.get("texto", "").strip()
+    if not titulo or not texto:
+        raise HTTPException(status_code=400, detail="Se requieren titulo y texto del comunicado")
+
+    contenido = await _generar_contenido_redes(titulo, texto)
+
+    flyer_x        = _generar_flyer_x(titulo, contenido["x"])
+    flyer_ig_post  = _generar_flyer_igpost(titulo, contenido["ig_post"])
+    flyer_ig_story = _generar_flyer_igstory(titulo, contenido["ig_story"])
+
+    return {
+        "x":            contenido["x"],
+        "ig_post":      contenido["ig_post"],
+        "ig_story":     contenido["ig_story"],
+        "flyer_x":      flyer_x,
+        "flyer_ig_post": flyer_ig_post,
+        "flyer_ig_story": flyer_ig_story,
+    }
