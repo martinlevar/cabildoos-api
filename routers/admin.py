@@ -520,6 +520,8 @@ def _enviar_email(to_email: str, subject: str, body_text: str = "", body_html: s
         "headers": {
             # ID único por destinatario — evita que Gmail agrupe envíos como campaña
             "X-Entity-Ref-ID": f"cabildoos-{to_email}",
+            # Indica a los clientes de correo que es una lista de distribución
+            "Precedence": "list",
         },
     }
 
