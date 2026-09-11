@@ -1,11 +1,9 @@
 import os
 import logging
-from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import admin, playroom, digest
-from services.gemini import init_gemini
+from routers import admin, nerdocrasy, digest
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,25 +13,10 @@ logger = logging.getLogger(__name__)
 
 _is_dev = os.environ.get("ENV", "production").lower() in ("dev", "development", "local")
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # ── Startup ──
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
-    if gemini_key:
-        init_gemini(gemini_key)
-        logger.info("Gemini client inicializado ✓")
-    else:
-        logger.warning("GEMINI_API_KEY no configurada — endpoints de Playroom no funcionarán")
-    yield
-    # ── Shutdown ──
-
-
 app = FastAPI(
     title="CabildoOS API",
-    version="2.0.0",
-    description="Backend de administración para CabildoOS (verificación migrada a Cloudflare Workers)",
-    lifespan=lifespan,
+    version="2.1.0",
+    description="Backend de administración para CabildoOS",
     # Swagger/OpenAPI deshabilitado en producción (expone superficie de ataque)
     docs_url="/docs" if _is_dev else None,
     redoc_url="/redoc" if _is_dev else None,
@@ -63,7 +46,7 @@ app.add_middleware(
 
 # ── Routers ────────────────────────────────────────────────────────────────────
 app.include_router(admin.router)
-app.include_router(playroom.router)
+app.include_router(nerdocrasy.router)
 app.include_router(digest.router)
 
 
@@ -71,9 +54,8 @@ app.include_router(digest.router)
 async def root():
     return {
         "service": "CabildoOS API",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "status": "ok",
-        "note": "Verificación de identidad migrada a verify.cabildodevenezuela.com",
     }
 
 
@@ -81,6 +63,6 @@ async def root():
 async def health():
     return {
         "ok": True,
-        "version": "2.0.0",
+        "version": "2.1.0",
         "status": "ok",
     }
