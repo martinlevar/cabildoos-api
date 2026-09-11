@@ -160,11 +160,9 @@ INSTRUCCIONES:
             _record_call()
         return response.text.strip()
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
         _record_error(f"digest_gemini: {e}")
-        logger.error(f"Gemini digest error: {e}\n{tb}")
-        return f"[ERROR GEMINI] {type(e).__name__}: {e}"
+        logger.error(f"Gemini digest error: {e}")
+        return "El resumen narrativo no pudo generarse en este momento."
 
 
 async def generar_resumen_gemini(datos: dict) -> str:
