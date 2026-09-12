@@ -358,10 +358,14 @@ async def test_gemini():
         return {"ok": False, "error": "GEMINI_API_KEY no configurada"}
     try:
         client = _genai.Client(api_key=api_key)
+        all_models = list(client.models.list())
         models = [
-            m.name for m in client.models.list()
-            if any("generateContent" in (m.supported_actions or []))
+            m.name for m in all_models
+            if isinstance(getattr(m, "supported_actions", None), (list, tuple))
+            and "generateContent" in m.supported_actions
         ]
+        if not models:
+            models = [m.name for m in all_models]
         return {"ok": True, "modelos_disponibles": models}
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)}"}
