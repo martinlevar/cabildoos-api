@@ -217,6 +217,31 @@ Para verificarte, ingresá a cabildoos.pages.dev y hacé clic en "Verificar iden
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+def _borrar_fotos_verificacion_de_usuario(supabase: Client, user_id: str) -> None:
+    """
+    PRIVACIDAD: borra del Storage las fotos (documento + selfie) de las verificaciones
+    de un usuario. Se llama ANTES de admin_delete_user, que borra las filas de
+    verifications pero no los archivos (antes quedaban fotos huérfanas).
+    Nunca lanza excepción: un fallo aquí no debe impedir eliminar al usuario.
+    """
+    try:
+        res = supabase.table("verifications").select("id").eq("user_id", user_id).execute()
+        ids = [r["id"] for r in (res.data or [])]
+        prof = supabase.table("profiles").select("verification_id").eq("id", user_id).maybe_single().execute()
+        vid = (prof.data or {}).get("verification_id") if prof and prof.data else None
+        if vid and vid not in ids:
+            ids.append(vid)
+        paths = []
+        for vid in ids:
+            paths += [f"{vid}/selfie_documento.jpg", f"{vid}/documento.jpg"]
+        if paths:
+            supabase.storage.from_("verifications").remove(paths)
+            logger.info(f"Fotos de verificación borradas para usuario {user_id}: {len(ids)} verificación(es)")
+    except Exception as e:
+        logger.warning(f"No se pudieron borrar fotos de verificación de {user_id}: {e}")
+
+
 @router.delete("/users/{user_id}")
 async def delete_user(
     user_id: str,
@@ -235,6 +260,7 @@ async def delete_user(
     # Delegar toda la limpieza al RPC admin_delete_user:
     # borra seat_identities (libera butaca), verifications (libera DNI),
     # verification_requests, profiles y auth.users en un solo paso atómico.
+    _borrar_fotos_verificacion_de_usuario(supabase, user_id)
     try:
         supabase.rpc("admin_delete_user", {"p_user_id": user_id}).execute()
     except Exception as e:
@@ -297,6 +323,7 @@ async def block_doc_and_delete_user(
     # Delegar la eliminación completa al RPC (libera butaca + DNI + historial)
     # El doc_hash ya quedó copiado a blocked_doc_hashes arriba — queda bloqueado
     # incluso si el RPC borra la verificación original.
+    _borrar_fotos_verificacion_de_usuario(supabase, user_id)
     try:
         supabase.rpc("admin_delete_user", {"p_user_id": user_id}).execute()
     except Exception as e:
