@@ -42,14 +42,17 @@ def obtener_datos_ayer(supabase: Client) -> dict:
     preguntas = preguntas_res.data or []
 
     question_ids = [q["id"] for q in preguntas]
-    votos, mensajes = [], []
+    votos, mensajes = {}, []
 
     if question_ids:
-        votos_res = supabase.table("votes") \
-            .select("question_id, vote_plain") \
+        # Secreto del voto: ya no existen votos individuales, solo contadores por pregunta
+        votos_res = supabase.table("vote_tally") \
+            .select("question_id, cnt_si, cnt_no, cnt_abs") \
             .in_("question_id", question_ids) \
             .execute()
-        votos = votos_res.data or []
+        for t in (votos_res.data or []):
+            conteo = {k: int(t.get("cnt_" + k) or 0) for k in ("si", "no", "abs")}
+            votos[t["question_id"]] = {k: n for k, n in conteo.items() if n > 0}
 
         mensajes_res = supabase.table("debate_messages") \
             .select("question_id, seat_number, alias, text, created_at") \
@@ -82,7 +85,15 @@ def obtener_emails_verificados(supabase: Client) -> list:
     return [row["email"] for row in (res.data or []) if row.get("email")]
 
 
-def _votos_por_pregunta(votos: list) -> dict:
+def _total_votos(votos) -> int:
+    if isinstance(votos, dict):
+        return sum(sum(c.values()) for c in votos.values())
+    return len(votos)
+
+
+def _votos_por_pregunta(votos) -> dict:
+    if isinstance(votos, dict):          # ya viene como {question_id: {opcion: cantidad}}
+        return votos
     resultado: dict = {}
     for v in votos:
         qid = v["question_id"]
@@ -203,7 +214,7 @@ def construir_email_html(datos: dict, resumen: str) -> str:
     propuestas = datos["propuestas"]
 
     total_preguntas  = len(preguntas)
-    total_votos      = len(votos)
+    total_votos      = _total_votos(votos)
     total_mensajes   = len(mensajes)
     total_propuestas = len(propuestas)
 
@@ -381,7 +392,7 @@ async def enviar_digest(supabase: Client) -> dict:
     datos = await asyncio.to_thread(obtener_datos_ayer, supabase)
     logger.info(
         f"Digest [{datos['fecha_str']}]: {len(datos['preguntas'])} preguntas, "
-        f"{len(datos['votos'])} votos, {len(datos['propuestas'])} propuestas"
+        f"{_total_votos(datos['votos'])} votos, {len(datos['propuestas'])} propuestas"
     )
 
     # 2. Gemini narrative
