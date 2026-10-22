@@ -152,8 +152,17 @@ async def list_users(
         raise HTTPException(status_code=500, detail=f"Error consultando auth users: {e}")
 
     # 2. Profiles — alias y butaca_numero fueron migrados a seat_identities (privacidad)
-    profiles_res = supabase.table("profiles").select("id, verification_id, status").execute()
-    profiles = {p["id"]: p for p in (profiles_res.data or [])}
+    # perfiles-paginados: Supabase devuelve como máximo 1.000 filas por consulta; se piden de a 1.000 hasta el final
+    profiles = {}
+    desde, LOTE = 0, 1000
+    while True:
+        lote = (supabase.table("profiles").select("id, verification_id, status")
+                .order("id").range(desde, desde + LOTE - 1).execute().data or [])
+        for p in lote:
+            profiles[p["id"]] = p
+        if len(lote) < LOTE:
+            break
+        desde += LOTE
 
     # 3. Combinar
     result = []
