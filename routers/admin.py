@@ -164,11 +164,26 @@ async def list_users(
             break
         desde += LOTE
 
-    # 3. Combinar
+    # api-usuarios-estado: quiénes tienen una verificación esperando revisión (son pocas)
+    en_revision = set()
+    try:
+        filas = (supabase.table("verifications").select("user_id").eq("status", "pendiente_revision")
+                 .limit(1000).execute().data or [])
+        en_revision = {f["user_id"] for f in filas if f.get("user_id")}
+    except Exception:
+        pass
+
+    # 3. Combinar — el estado de verificación y el de la cuenta van separados
     result = []
     for uid, u in auth_users.items():
         p = profiles.get(uid, {})
-        status = "verificado" if p.get("verification_id") else (p.get("status") or "sin_verificar")
+        if p.get("verification_id"):
+            status = "verificado"
+        elif uid in en_revision:
+            status = "pendiente_revision"
+        else:
+            status = "sin_verificar"
+        cuenta = p.get("status") if p.get("status") in ("suspended", "banned") else "active"
         result.append({
             "id":          uid,
             "email":       u["email"],
@@ -178,7 +193,7 @@ async def list_users(
             "last_sign_in": u["last_sign_in"],
             "verified":       bool(p.get("verification_id")),
             "status":         status,
-            "account_status": p.get("status", "active"),
+            "account_status": cuenta,
         })
 
     result.sort(key=lambda x: x["created_at"], reverse=True)
